@@ -1,0 +1,21 @@
+{
+  "name": "composer-swarm-local",
+  "owner": {
+    "name": "local"
+  },
+  "metadata": {
+    "description": "Repo-local Composer Swarm commands for Claude Code.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "composer",
+      "description": "Launch local Cursor/Composer workers through composer-swarm.",
+      "version": "0.1.0",
+      "author": {
+        "name": "local"
+      },
+      "source": "./plugins/composer-swarm"
+    }
+  ]
+}
