@@ -147,6 +147,10 @@ test("release packaging excludes local generated state and reference checkouts",
     assert.match(npmignore, new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")), "GitHub CI workflow should exist");
+  assert.ok(
+    fs.statSync(path.join(ROOT, "bin", "composer-swarm.mjs")).mode & 0o111,
+    "CLI bin should be executable when installed directly or symlinked"
+  );
 });
 
 test("Codex skill packaging stays synced between repo root and plugin bundle", () => {
