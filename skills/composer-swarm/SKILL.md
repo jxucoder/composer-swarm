@@ -9,6 +9,8 @@ Use this skill when the user asks Codex to delegate repo research, implementatio
 
 Operating split: Codex is the main agent. Fast, low-cost Composer workers provide broader code search, extra reasoning, read-only research, isolated candidate patches, and review-only checks. Codex verifies, compares, and applies only after explicit approval.
 
+Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the routine that decides when to call CLI tools. Each `composer-swarm` command is a tool call. Launching Composer workers is a bounded handoff to isolated worker processes. `.composer-swarm/state/` is the explicit context store. Control returns to Codex for verification, approval, and final action.
+
 ## Runtime
 
 - Prefer `composer-swarm` when it is on `PATH`.

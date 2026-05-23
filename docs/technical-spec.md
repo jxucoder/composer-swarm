@@ -3,6 +3,28 @@
 Composer Swarm v1 is a repo-only Node CLI with thin host adapters for Claude Code and Codex. The CLI is the
 runtime; plugins and skills only invoke it.
 
+## OpenAI Swarm Pattern
+
+The design follows the useful parts of [OpenAI Swarm](https://github.com/openai/swarm)'s educational model
+without depending on the Python package. OpenAI Swarm is intentionally lightweight and now superseded by the
+[OpenAI Agents SDK](https://openai.github.io/openai-agents-js/) for production OpenAI agent apps, so Composer
+Swarm copies the primitives rather than the dependency:
+
+- **Routine:** The Codex skill or Claude command file is the host routine. It tells the main agent when to
+  call setup, research, team, status, result, verify, apply, and cleanup.
+- **Tools:** CLI commands are the tool boundary. The host agent invokes `composer-swarm` commands and receives
+  structured task state, transcripts, patches, and verifier output.
+- **Handoff:** Starting a Composer worker is a handoff from the host agent to an isolated worker process. The
+  handoff is explicit, bounded by a worker label, worktree, prompt, timeout, and transcript.
+- **Context variables:** `.composer-swarm/state/` is the durable context store. The runtime records task
+  status, worker output, candidate patches, verifier checks, and selected candidates instead of relying on
+  hidden model memory.
+- **Return to host:** Composer workers do not apply patches or own final judgment. Results return to the host
+  agent, which cross-checks evidence, asks for approval, and runs final checks.
+
+This keeps the Swarm-style control loop small: call a routine, run tool-backed handoffs, update explicit
+state, then return control to the main agent.
+
 ## Runtime Model
 
 `composer-swarm` resolves the target git workspace, reads `.composer-swarm/config.json`, creates isolated

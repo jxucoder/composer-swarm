@@ -7,6 +7,10 @@ making the human drive a second CLI. Composer is fast and low-cost enough to run
 code search, extra reasoning, alternate implementations, and review-only checks while the main agent keeps
 control of judgment and apply.
 
+The design borrows OpenAI Swarm's lightweight routines-and-handoffs pattern: the host skill or plugin is the
+routine, CLI commands are tool calls, Composer workers are bounded handoffs, and task state is explicit on
+disk.
+
 ## What You Get
 
 - `/composer:team` to hand a coding task to isolated Composer workers for broader search and candidate patches
