@@ -115,6 +115,8 @@ Runtime config lives at `.composer-swarm/config.json` in the target project. See
 - `distribution.defaultWorkerModel` must stay `composer-2.5-fast`.
 - `workers.composer` configures the `cursor-agent` command used for Composer workers.
 - `verify` requires `workers.verifier`. The default config runs `npm test`.
+- Older `defaultRoles`, `agents[].role`, and `plan --roles` usage has been replaced by worker count flags:
+  `team --builders`, `review --scouts`, and `research --workers`.
 - A top-level `policies` field is ignored if present; it is stripped during config load and has no effect in
   v1.
 

@@ -225,6 +225,19 @@ test("CLI accepts quoted raw slash-command arguments", () => {
   assert.doesNotMatch(result.stdout, /composer-builder-a/);
 });
 
+test("CLI rejects removed plan role selection flag", () => {
+  const repo = makeRepo();
+  const result = spawnSync(
+    process.execPath,
+    [CLI, "plan", "fix this", "--roles", "planner,builder-a"],
+    { cwd: repo, encoding: "utf8" }
+  );
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /plan no longer accepts worker selection flags/);
+  assert.match(result.stderr, /team --builders/);
+  assert.match(result.stderr, /review --scouts/);
+});
+
 test("CLI research runs a read-only workflow with quoted arguments", () => {
   const repo = makeRepo();
   const fakeBin = makeFakeCursorAgent();
