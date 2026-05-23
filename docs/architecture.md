@@ -43,6 +43,7 @@ Claude Code:
 
 ```text
 /composer:team
+/composer:research
 /composer:status
 /composer:result
 /composer:verify
@@ -96,8 +97,8 @@ Composer workers are launched through `cursor-agent` or a compatible Cursor/Comp
 Cursor model `composer-2.5-fast`.
 
 The user config only names the Composer CLI command and optional verifier command. The runtime picks the
-worker shape from command flags: `team --builders <1-4>` for implementation work, and `review --scouts
-<0-4>` for read-only review work.
+worker shape from command flags: `team --builders <1-4>` for implementation work, `research --workers
+<1-4>` for read-only repo research, and `review --scouts <0-4>` for read-only review work.
 
 Every worker adapter implements the same contract:
 
@@ -185,7 +186,7 @@ If two workers need the same paths, the coordinator should serialize them or spl
 ## Recommended MVP
 
 1. Ship `composer-swarm` as a repo-only CLI that can create worktrees and launch `cursor-agent`.
-2. Ship a local Claude Code plugin with `/composer:setup`, `/composer:team`, `/composer:review`, `/composer:status`, `/composer:result`, `/composer:verify`, `/composer:apply`, and `/composer:cancel`.
+2. Ship a local Claude Code plugin with `/composer:setup`, `/composer:team`, `/composer:research`, `/composer:review`, `/composer:status`, `/composer:result`, `/composer:verify`, `/composer:apply`, and `/composer:cancel`.
 3. Ship a Codex plugin/skill that calls the same CLI and asks before applying patches.
 4. List candidate patches, summaries, changed files, checks, and reviewer notes.
 5. Defer MCP until the CLI worker loop is stable.

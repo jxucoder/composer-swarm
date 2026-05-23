@@ -61,6 +61,7 @@ Apply it? y/n
 Claude Code plugin:
 
 - `/composer:team`
+- `/composer:research`
 - `/composer:status`
 - `/composer:result`
 - `/composer:apply`
@@ -157,6 +158,7 @@ Keep the raw CLI useful:
 
 ```bash
 composer-swarm team "fix flaky login test" --builders 2
+composer-swarm research "map auth token flow" --workers 3 --background
 composer-swarm status
 composer-swarm result
 composer-swarm apply task_123 --candidate builder-a

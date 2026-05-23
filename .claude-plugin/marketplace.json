@@ -4,13 +4,13 @@
     "name": "jxucoder"
   },
   "metadata": {
-    "description": "Add fast, low-cost Composer worker teams to Claude Code.",
+    "description": "Add fast, low-cost Composer research and worker teams to Claude Code.",
     "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "composer",
-      "description": "Delegate coding tasks from Claude Code to fast Cursor/Composer workers.",
+      "description": "Delegate coding and research tasks from Claude Code to fast Cursor/Composer workers.",
       "version": "0.1.0",
       "author": {
         "name": "jxucoder"

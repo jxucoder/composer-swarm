@@ -10,6 +10,7 @@ control of judgment and apply.
 ## What You Get
 
 - `/composer:team` to hand a coding task to isolated Composer workers for broader search and candidate patches
+- `/composer:research` for read-only repo search while the main agent keeps investigating
 - `/composer:review` for review-only broader search and extra critique
 - `/composer:status` and `/composer:result` to follow background work
 - `/composer:verify` to run configured checks against candidates
@@ -55,6 +56,7 @@ One simple first run is:
 
 ```text
 /composer:team fix the failing tests --background
+/composer:research map the config loading flow --background
 /composer:status
 /composer:result
 ```
@@ -74,6 +76,7 @@ Then ask Codex naturally from the project you want to work on:
 
 ```text
 Use Composer Swarm to review this project.
+Use Composer Swarm to research how config loading works with three workers.
 Use Composer Swarm to review this project with three scouts.
 Use Composer Swarm to fix the failing tests with two builders.
 ```
@@ -85,6 +88,7 @@ workflow calls for them. Without skill support, tell Codex to use the CLI direct
 ## What Stays Safe
 
 - workers use isolated git worktrees
+- research is read-only and has no apply path
 - Cursor workers are pinned to `composer-2.5-fast`
 - generated state stays under `.composer-swarm/state/`
 - apply is manual and requires an explicit selected candidate

@@ -35,6 +35,7 @@ From the target project:
 ```bash
 composer-swarm setup --init --trust
 composer-swarm team "implement the requested change" --builders 2
+composer-swarm research "map the config loading flow" --workers 3 --background
 composer-swarm review --preset repo --scouts 2 --background
 composer-swarm status <task-id>
 composer-swarm result <task-id>
@@ -77,6 +78,7 @@ Commands:
 ```text
 /composer:setup
 /composer:team fix the failing tests --builders 2
+/composer:research map the config loading flow --workers 3
 /composer:status <task-id>
 /composer:result <task-id>
 /composer:verify <task-id>
@@ -98,6 +100,7 @@ should stay identical to the repo-root skill file.
 The skill tells Codex to:
 
 - run `setup`; use `setup --init --trust` when config is missing
+- for broad repo understanding, start its own investigation and launch `research --workers <1-4>` in parallel
 - choose `team --builders <1-4>` or `review --scouts <0-4>` from the user's request
 - inspect `status` and `result`
 - run `verify` before recommending a candidate when patches exist

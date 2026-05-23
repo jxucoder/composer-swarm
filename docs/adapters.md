@@ -34,6 +34,7 @@ Claude Code should use slash commands that call the runtime:
 ```text
 /composer:setup
 /composer:team [task]
+/composer:research [question] [--workers 1..4] [--focus architecture|tests|security|docs|release]
 /composer:review [--preset repo|security|tests] [--scouts 0..4]
 /composer:status [task-id]
 /composer:result [task-id]
@@ -63,6 +64,9 @@ remain CLI-backed workers, not native Claude teammates.
 Codex environments that support local skills or plugins should get a skill with simple operating rules:
 
 - use `composer-swarm setup` before starting; run `setup --init --trust` when config is missing
+- when repo understanding is broad, uncertain, or high-impact, start Codex's own investigation and launch
+  `composer-swarm research "<question>" --workers <1-4> --background` in parallel
+- treat research output as evidence-backed leads and cross-check important claims
 - use `composer-swarm team "<task>"` to launch Composer workers
 - keep Composer workers on Cursor model `composer-2.5-fast`
 - inspect candidate summaries and patches

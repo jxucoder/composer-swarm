@@ -73,12 +73,16 @@ Composer workers are launched through `cursor-agent` with:
 fast and low-cost enough to spend on wider code search, additional reasoning, review-only passes, and
 alternate implementation attempts while the host agent owns final judgment.
 
+Research work uses one to four read-only Composer workers. It does not create candidates, verifier checks,
+recommendations, or apply commands. Research is designed to run while the host agent continues its own repo
+investigation and later reconciles the Composer evidence.
+
 Default implementation work uses one planning pass, one to four isolated implementation attempts, and one
 review pass. Review-only work uses one planning pass, optional read-only scout passes, and one review pass.
 These worker labels are runtime state, not user-configured personas.
 
-Planning, scout, and review passes run in Cursor plan mode. Implementation workers run with edit access
-inside isolated git worktrees only.
+Planning, research, scout, and review passes run in Cursor plan mode. Implementation workers run with edit
+access inside isolated git worktrees only.
 
 ## CLI Reference
 
@@ -88,6 +92,7 @@ composer-swarm setup [--init] [--trust] [--force] [--json]
 composer-swarm doctor
 composer-swarm plan <task text>
 composer-swarm team <task text> [--builders 2] [--background|--wait]
+composer-swarm research <question> [--workers 2] [--focus <area>] [--background|--wait]
 composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
 composer-swarm status [task-id]
 composer-swarm result [task-id] [--verbose]
@@ -103,6 +108,19 @@ composer-swarm cleanup [task-id]
 
 `setup` checks git, config, Node, the configured Composer worker command, and the configured shell verifier
 command. `setup --init --trust` writes `.composer-swarm/config.json` with trusted Composer worker args.
+
+## Research
+
+Research tasks are read-only and return evidence for the host agent:
+
+```bash
+composer-swarm research "Find every place config is loaded or normalized" --workers 3 --background
+composer-swarm research "Map the release flow and risky manual steps" --workers 4 --focus release
+```
+
+Use `--workers 1..4` to choose breadth. Use `--focus` for a coarse area such as `architecture`, `tests`,
+`security`, `docs`, or `release`. The host agent should continue its own search while research runs, then
+read `result --verbose` and cross-check important claims against the cited files or commands.
 
 ## Reviews
 
@@ -122,6 +140,9 @@ patches.
 `result` shows candidate IDs, changed-file counts, patch size, verifier status, reviewer notes, and the
 detected recommendation when one can be parsed. Use `--verbose` for patch paths, worktree paths, and failed
 check output.
+
+For research tasks, `result --verbose` shows each research worker's evidence and transcript path. It never
+prints apply commands.
 
 ## Verification
 
@@ -160,6 +181,7 @@ Claude Code local plugin files live in `plugins/composer-swarm`. They expose:
 ```text
 /composer:setup
 /composer:team
+/composer:research
 /composer:review
 /composer:status
 /composer:result

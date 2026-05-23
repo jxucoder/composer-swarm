@@ -10,6 +10,7 @@ import {
   buildCursorAgentArgs,
   buildRolePrompt,
   cleanupTask,
+  createResearchTask,
   createReviewTask,
   createTeamTask,
   DEFAULT_CURSOR_MODEL,
@@ -21,6 +22,7 @@ import {
   loadConfig,
   loadTask,
   planTask,
+  researchRoles,
   renderResult,
   renderStatus,
   resolveWorkspaceContext,
@@ -253,6 +255,9 @@ test("cursor-agent args use stream-json, workspace, model, and plan mode for non
 
   const scoutArgs = buildCursorAgentArgs({ role: "scout-a", worktree: "/tmp/w", prompt: "inspect" });
   assert.equal(scoutArgs.includes("--mode=plan"), true);
+
+  const researchArgs = buildCursorAgentArgs({ role: "research-a", worktree: "/tmp/w", prompt: "research" });
+  assert.equal(researchArgs.includes("--mode=plan"), true);
 });
 
 test("Composer workers are pinned to Composer 2.5 Fast", () => {
@@ -295,6 +300,12 @@ test("role prompts include objective, role, planner output, and candidate contex
   assert.match(scoutPrompt, /Scout task/);
   assert.match(scoutPrompt, /Do not edit files/);
   assert.match(scoutPrompt, /inspect runtime/);
+
+  const researchPrompt = buildRolePrompt("research-a", { ...task, options: { research: true, focus: "architecture" } });
+  assert.match(researchPrompt, /Research task/);
+  assert.match(researchPrompt, /Do not edit files/);
+  assert.match(researchPrompt, /Required output format/);
+  assert.match(researchPrompt, /Requested focus: architecture/);
 });
 
 test("workflow creates worktrees, records transcripts, captures modified and new-file patches", async () => {
@@ -412,6 +423,51 @@ test("review workflow can fan out to read-only scouts", async () => {
   assert.match(resultText, /scout-a done/);
 });
 
+test("research workflow runs read-only workers without candidates or clean-checkout gating", async () => {
+  const repo = makeRepo();
+  const fake = makeFakeCursorAgent(repo);
+  const config = configWithCursor(fake.scriptPath);
+  fs.writeFileSync(path.join(repo, "src", "app.txt"), "dirty main checkout\n", "utf8");
+
+  const task = createResearchTask(config, repo, "map config loading", {
+    workers: 2,
+    focus: "architecture",
+    taskId: "task_research"
+  });
+  await runTaskWorkflow(config, repo, task.taskId);
+
+  const stored = loadTask(config, repo, task.taskId);
+  assert.equal(stored.status, "completed");
+  assert.equal(stored.options.research, true);
+  assert.equal(stored.options.focus, "architecture");
+  assert.equal(stored.candidates.length, 0);
+  assert.equal(stored.reviewer, null);
+  assert.deepEqual(
+    stored.workers.map((worker) => worker.role),
+    ["research-a", "research-b"]
+  );
+  assert.deepEqual(researchRoles(2), ["research-a", "research-b"]);
+  assert.equal(stored.research.length, 2);
+
+  const invocations = fs
+    .readFileSync(fake.logPath, "utf8")
+    .trim()
+    .split(/\n/)
+    .map((line) => JSON.parse(line));
+  assert.equal(invocations.length, 2);
+  assert.equal(invocations.find((entry) => entry.role === "research-a").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.role === "research-b").args.includes("--mode=plan"), true);
+
+  const resultText = renderResult(config, repo, task.taskId, { verbose: true });
+  assert.match(resultText, /Research question: map config loading/);
+  assert.match(resultText, /research pass A:/);
+  assert.match(resultText, /Main agent guidance:/);
+  assert.doesNotMatch(resultText, /Candidate:/);
+  assert.doesNotMatch(resultText, /Apply:/);
+  assert.doesNotMatch(renderStatus(config, repo, task.taskId), /Verify:/);
+  assert.equal(fs.readFileSync(path.join(repo, "src", "app.txt"), "utf8"), "dirty main checkout\n");
+});
+
 test("applyCandidate applies exactly one stored patch", async () => {
   const repo = makeRepo();
   const fake = makeFakeCursorAgent(repo);
@@ -507,6 +563,20 @@ test("createReviewTask can add read-only scout workers", () => {
   );
   assert.equal(task.workers.find((worker) => worker.role === "scout-a").canEdit, false);
   assert.throws(() => createReviewTask(config, repo, "tests", { scouts: 5 }), /requires 0 to 4 scouts/);
+});
+
+test("createResearchTask validates worker count", () => {
+  const repo = makeRepo();
+  const config = defaultConfig();
+  const task = createResearchTask(config, repo, "find release risks", { taskId: "task_research_shape", workers: 3 });
+  assert.equal(task.options.research, true);
+  assert.equal(task.options.workers, 3);
+  assert.deepEqual(
+    task.workers.map((worker) => worker.role),
+    ["research-a", "research-b", "research-c"]
+  );
+  assert.equal(task.workers.some((worker) => worker.canEdit), false);
+  assert.throws(() => createResearchTask(config, repo, "too many", { workers: 5 }), /requires 1 to 4 workers/);
 });
 
 test("createTeamTask rejects zero builders outside review mode", () => {

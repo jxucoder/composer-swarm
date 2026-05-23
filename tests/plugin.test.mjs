@@ -47,6 +47,7 @@ function makeFakeCursorAgent() {
 
 test("Claude Code command files preserve plugin UX and quote raw arguments", () => {
   const team = read("plugins/composer-swarm/commands/team.md");
+  const research = read("plugins/composer-swarm/commands/research.md");
   const review = read("plugins/composer-swarm/commands/review.md");
   const setup = read("plugins/composer-swarm/commands/setup.md");
   const result = read("plugins/composer-swarm/commands/result.md");
@@ -66,6 +67,17 @@ test("Claude Code command files preserve plugin UX and quote raw arguments", () 
   assert.doesNotMatch(team, /team "\$ARGUMENTS" --(?:wait|background)/);
   assert.match(team, /composer-2\.5-fast/);
   assert.doesNotMatch(team, /--model <model>/);
+
+  assert.match(research, /disable-model-invocation: true/);
+  assert.match(research, /research-only/i);
+  assert.match(research, /main agent should continue its own repo investigation/i);
+  assert.match(research, /AskUserQuestion/);
+  assert.match(research, /research "\$ARGUMENTS"\n/);
+  assert.match(research, /Preserve the user's arguments exactly/);
+  assert.match(research, /run_in_background: true/);
+  assert.match(research, /Bash\(\{/);
+  assert.doesNotMatch(research, /research "\$ARGUMENTS" --(?:wait|background)/);
+  assert.match(research, /composer-2\.5-fast/);
 
   assert.match(review, /disable-model-invocation: true/);
   assert.match(review, /review-only/i);
@@ -211,6 +223,29 @@ test("CLI accepts quoted raw slash-command arguments", () => {
   assert.match(result.stdout, /implementation pass A \(can edit\)/);
   assert.match(result.stdout, /review pass \(read-only\)/);
   assert.doesNotMatch(result.stdout, /composer-builder-a/);
+});
+
+test("CLI research runs a read-only workflow with quoted arguments", () => {
+  const repo = makeRepo();
+  const fakeBin = makeFakeCursorAgent();
+  const result = spawnSync(
+    process.execPath,
+    [CLI, "research", "map", "quoted flow", "--workers", "1", "--focus", "docs"],
+    {
+      cwd: repo,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`
+      }
+    }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Started task_/);
+  assert.match(result.stdout, /Objective: map quoted flow/);
+  assert.match(result.stdout, /Research:/);
+  assert.match(result.stdout, /Result: composer-swarm result task_.* --verbose/);
+  assert.doesNotMatch(result.stdout, /Apply:/);
 });
 
 test("setup can initialize trusted config from the friendly entrypoint", () => {

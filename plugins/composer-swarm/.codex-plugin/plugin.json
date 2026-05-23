@@ -1,24 +1,25 @@
 {
   "name": "composer-swarm",
   "version": "0.1.0",
-  "description": "Add fast, low-cost Composer worker teams to Codex.",
+  "description": "Add fast, low-cost Composer research and worker teams to Codex.",
   "author": {
     "name": "jxucoder"
   },
   "homepage": "https://github.com/jxucoder/composer-swarm",
   "repository": "https://github.com/jxucoder/composer-swarm",
   "license": "MIT",
-  "keywords": ["composer", "cursor", "codex", "agents", "review"],
+  "keywords": ["composer", "cursor", "codex", "agents", "research", "review"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Composer Swarm",
-    "shortDescription": "Run fast local Composer teams from Codex.",
-    "longDescription": "Composer Swarm lets Codex use fast local Cursor/Composer workers for broader code search, extra reasoning, candidate patches, verification, and explicit-approval apply.",
+    "shortDescription": "Run fast local Composer research and teams from Codex.",
+    "longDescription": "Composer Swarm lets Codex use fast local Cursor/Composer workers for read-only research, broader code search, extra reasoning, candidate patches, verification, and explicit-approval apply.",
     "developerName": "jxucoder",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
       "Use Composer Swarm to fix this bug.",
+      "Use Composer Swarm to research this code path.",
       "Run a Composer Swarm review.",
       "Compare Composer Swarm candidates."
     ],

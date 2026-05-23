@@ -11,6 +11,7 @@ const TASK_SCHEMA = "composer-swarm.task.v1";
 const CANDIDATE_SCHEMA = "composer-swarm.candidate.v1";
 const BUILDER_SUFFIXES = ["a", "b", "c", "d"];
 const SCOUT_SUFFIXES = ["a", "b", "c", "d"];
+const RESEARCH_SUFFIXES = ["a", "b", "c", "d"];
 const CURSOR_CONFIG_RACE_RETRY_DELAY_MS = 750;
 export const DEFAULT_CURSOR_MODEL = "composer-2.5-fast";
 
@@ -345,6 +346,9 @@ function workerDisplayName(label) {
   if (label?.startsWith("scout-")) {
     return `scout pass ${label.slice("scout-".length).toUpperCase()}`;
   }
+  if (label?.startsWith("research-")) {
+    return `research pass ${label.slice("research-".length).toUpperCase()}`;
+  }
   return label ?? "worker";
 }
 
@@ -555,7 +559,19 @@ export function scoutRoles(count = 0) {
   return SCOUT_SUFFIXES.slice(0, bounded).map((suffix) => `scout-${suffix}`);
 }
 
+export function researchRoles(count = 2) {
+  const numeric = Number.isFinite(Number(count)) ? Number(count) : 2;
+  if (numeric <= 0) {
+    return [];
+  }
+  const bounded = Math.max(1, Math.min(RESEARCH_SUFFIXES.length, Math.trunc(numeric)));
+  return RESEARCH_SUFFIXES.slice(0, bounded).map((suffix) => `research-${suffix}`);
+}
+
 function executionRoles(options = {}) {
+  if (options.research) {
+    return researchRoles(options.workers ?? 2);
+  }
   if (options.review) {
     return ["planner", ...scoutRoles(options.scouts ?? 0), "reviewer"];
   }
@@ -564,19 +580,27 @@ function executionRoles(options = {}) {
 
 export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   const gitRoot = requireGitWorkspace(workspaceRoot);
-  assertCleanMainCheckout(gitRoot);
+  if (!options.research) {
+    assertCleanMainCheckout(gitRoot);
+  }
   ensureStateDirs(config, workspaceRoot);
 
   const taskId = options.taskId ?? createTaskId();
   const createdAt = new Date().toISOString();
-  const requestedBuilders = options.builders ?? 2;
-  const builderCount = builderRoles(requestedBuilders).length;
+  const isResearch = Boolean(options.research);
+  const requestedBuilders = isResearch ? 0 : options.builders ?? 2;
+  const builderCount = isResearch ? 0 : builderRoles(requestedBuilders).length;
   const requestedScouts = options.scouts ?? 0;
   const scoutCount = scoutRoles(requestedScouts).length;
-  if (!options.review && builderCount < 1) {
+  const requestedResearchWorkers = options.workers ?? 2;
+  const researchCount = isResearch ? researchRoles(requestedResearchWorkers).length : 0;
+  if (isResearch && Number(requestedResearchWorkers) !== researchCount) {
+    throw new Error("composer-swarm research requires 1 to 4 workers.");
+  }
+  if (!isResearch && !options.review && builderCount < 1) {
     throw new Error("composer-swarm team requires 1 to 4 builders.");
   }
-  if (options.review && Number(requestedScouts) !== scoutCount) {
+  if (!isResearch && options.review && Number(requestedScouts) !== scoutCount) {
     throw new Error("composer-swarm review requires 0 to 4 scouts.");
   }
   const model = resolveCursorModel(config, options.model ?? null);
@@ -594,11 +618,14 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
     createdAt,
     updatedAt: createdAt,
     options: {
-      builders: options.review ? 0 : builderCount,
-      scouts: options.review ? scoutCount : 0,
+      builders: options.review || isResearch ? 0 : builderCount,
+      scouts: options.review && !isResearch ? scoutCount : 0,
+      workers: isResearch ? researchCount : undefined,
       model,
       background: Boolean(options.background),
-      review: Boolean(options.review)
+      review: Boolean(options.review),
+      research: isResearch,
+      focus: isResearch ? options.focus ?? null : undefined
     },
     workers: roles.map((role) => {
       const agent = agentForRole(config, role) ?? fallbackCursorAgent(role);
@@ -691,7 +718,7 @@ export function buildCursorAgentArgs({ role, worktree, prompt, model }) {
   if (model) {
     args.push("--model", model);
   }
-  if (role === "planner" || role === "reviewer" || role.startsWith("scout-")) {
+  if (role === "planner" || role === "reviewer" || role.startsWith("scout-") || role.startsWith("research-")) {
     args.push("--mode=plan");
   }
   args.push(prompt);
@@ -702,6 +729,7 @@ export function buildRolePrompt(role, task, context = {}) {
   const plannerText = context.plannerOutput?.trim() || "No planner output is available yet.";
   const candidateText = context.candidateText?.trim() || "No candidates are available yet.";
   const scoutText = context.scoutText?.trim() || "No scout notes are available yet.";
+  const isResearch = Boolean(task.options?.research);
   const base = [
     "You are a Composer worker launched by composer-swarm.",
     `Task id: ${task.taskId}`,
@@ -711,11 +739,38 @@ export function buildRolePrompt(role, task, context = {}) {
     "",
     "Rules:",
     "- Work only in the workspace passed to cursor-agent.",
-    "- Keep changes narrowly scoped to the objective.",
+    isResearch ? "- Do not edit files. Use plan/read-only mode for research only." : "- Keep changes narrowly scoped to the objective.",
     "- Prefer existing project patterns over new abstractions.",
-    "- Report exact checks you ran and their results.",
-    "- End with a concise summary, changed files, risks, and follow-up notes."
+    isResearch ? "- Back every important claim with file paths, line numbers, commands, or reproducible evidence." : "- Report exact checks you ran and their results.",
+    isResearch ? "- Treat your output as leads for the host agent to verify, not as final authority." : "- End with a concise summary, changed files, risks, and follow-up notes."
   ];
+
+  if (role.startsWith("research-")) {
+    return [
+      ...base,
+      "",
+      "Research task:",
+      "Use Cursor's repository search and code-understanding tools aggressively.",
+      researchFocus(role, task.options?.focus),
+      "The host agent is also doing its own investigation in parallel; avoid broad summaries and return evidence it can reconcile.",
+      "",
+      "Required output format:",
+      "Research question: <repeat the question>",
+      "Confidence: high|medium|low",
+      "",
+      "Findings:",
+      "- Finding: <specific claim>",
+      "  Evidence: <path:line>, <path:line>, or command output",
+      "  Why it matters: <short explanation>",
+      "  Follow-up: <what the host should inspect or verify>",
+      "",
+      "Open questions:",
+      "- <unknown or ambiguity, with where to inspect next>",
+      "",
+      "Suggested next actions:",
+      "- <concrete inspection, command, or implementation next step>"
+    ].join("\n");
+  }
 
   if (role === "planner") {
     if (task.options?.review) {
@@ -814,6 +869,22 @@ function scoutFocus(role) {
       return "Focus on usability, command ergonomics, maintainability, and edge cases.";
     default:
       return "Focus on a distinct repo area that adds useful coverage beyond the planner.";
+  }
+}
+
+function researchFocus(role, focus) {
+  const requested = focus ? `Requested focus: ${focus}.` : "Requested focus: broad repository research.";
+  switch (role) {
+    case "research-a":
+      return `${requested} Emphasize architecture, data flow, entry points, and cross-file relationships.`;
+    case "research-b":
+      return `${requested} Emphasize tests, CI, packaging, docs, and examples related to the question.`;
+    case "research-c":
+      return `${requested} Emphasize security, configuration, process handling, errors, and edge cases.`;
+    case "research-d":
+      return `${requested} Emphasize usability, release risks, maintenance risks, and hidden coupling.`;
+    default:
+      return `${requested} Pick a distinct angle that adds coverage beyond the other research workers.`;
   }
 }
 
@@ -1193,6 +1264,30 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
   saveTask(config, workspaceRoot, task);
 
   try {
+    if (task.options?.research) {
+      const researchRoleList = task.workers
+        .map((worker) => worker.role)
+        .filter((role) => role.startsWith("research-"));
+      const researchWorkers = await Promise.all(
+        researchRoleList.map((role) => runCursorWorker(config, workspaceRoot, task, role))
+      );
+      if (isCancelled(config, workspaceRoot, task.taskId)) {
+        return markCancelled(config, workspaceRoot, task);
+      }
+      task.research = researchWorkers.map((worker) => ({
+        worker: worker.role,
+        status: worker.status,
+        transcript: worker.transcript,
+        notes: worker.finalOutput || "(research worker did not provide notes)",
+        exitCode: worker.exitCode ?? null
+      }));
+      task.status = researchWorkers.some((worker) => worker.status === "failed") ? "failed" : "completed";
+      task.completedAt = new Date().toISOString();
+      delete task.backgroundPid;
+      saveTask(config, workspaceRoot, task);
+      return task;
+    }
+
     const planner = await runCursorWorker(config, workspaceRoot, task, "planner");
     if (isCancelled(config, workspaceRoot, task.taskId)) {
       return markCancelled(config, workspaceRoot, task);
@@ -1297,6 +1392,18 @@ export function createReviewTask(config, workspaceRoot, preset = "repo", options
     review: true,
     builders: 0,
     scouts: options.scouts ?? 0
+  });
+}
+
+export function createResearchTask(config, workspaceRoot, question, options = {}) {
+  return createTeamTask(config, workspaceRoot, question, {
+    ...options,
+    research: true,
+    review: false,
+    builders: 0,
+    scouts: 0,
+    workers: options.workers ?? 2,
+    focus: options.focus ?? null
   });
 }
 
@@ -1551,7 +1658,11 @@ function reviewerNotesExcerpt(notes, maxLen = 400) {
 
 function taskGuidance(task) {
   const lines = [];
-  if (task.status === "completed" || task.status === "patches-collected") {
+  if (task.options?.research && (task.status === "completed" || task.status === "failed")) {
+    lines.push(`Inspect: composer-swarm result ${task.taskId} --verbose`);
+    lines.push("Cross-check important research claims before acting.");
+    lines.push(`Cleanup: composer-swarm cleanup ${task.taskId}`);
+  } else if (task.status === "completed" || task.status === "patches-collected") {
     lines.push(`Inspect: composer-swarm result ${task.taskId}`);
     if (task.recommendedCandidateId) {
       lines.push(`Apply recommended: composer-swarm apply ${task.taskId} --recommended`);
@@ -1589,10 +1700,11 @@ export function formatTaskList(tasks) {
   if (!tasks.length) {
     return "No composer-swarm tasks found.";
   }
-  const lines = [`${pad("TASK", 22)} ${pad("STATUS", 17)} ${pad("CANDIDATES", 10)} OBJECTIVE`];
+  const lines = [`${pad("TASK", 22)} ${pad("STATUS", 17)} ${pad("OUTPUTS", 10)} OBJECTIVE`];
   for (const task of tasks) {
+    const outputCount = task.options?.research ? task.research?.length ?? 0 : task.candidates?.length ?? 0;
     lines.push(
-      `${pad(task.taskId, 22)} ${pad(task.status, 17)} ${pad(task.candidates?.length ?? 0, 10)} ${task.objective}`
+      `${pad(task.taskId, 22)} ${pad(task.status, 17)} ${pad(outputCount, 10)} ${task.objective}`
     );
   }
   return lines.join("\n");
@@ -1619,6 +1731,21 @@ export function formatTaskStatus(task) {
       .filter(Boolean)
       .join(" ");
     lines.push(`- ${worker.role}: ${worker.status}${detail ? ` (${detail})` : ""}`);
+  }
+  if (task.options?.research) {
+    lines.push("", "Research:");
+    if (!task.research?.length) {
+      lines.push("- pending");
+    } else {
+      for (const entry of task.research) {
+        lines.push(`- ${entry.worker}: ${entry.status}`);
+      }
+    }
+    lines.push("", "Next steps:");
+    for (const hint of taskGuidance(task)) {
+      lines.push(`- ${hint}`);
+    }
+    return lines.join("\n");
   }
   lines.push("", "Candidates:");
   if (!task.candidates?.length) {
@@ -1669,6 +1796,9 @@ function formatChecks(checks, verbose = false) {
 export function formatResult(task, options = {}) {
   const workspaceRoot = options.workspaceRoot ?? task.workspaceRoot ?? process.cwd();
   const verbose = Boolean(options.verbose);
+  if (task.options?.research) {
+    return formatResearchResult(task, { workspaceRoot, verbose });
+  }
   const lines = [
     `Task: ${task.taskId}`,
     `Status: ${task.status}`,
@@ -1716,6 +1846,43 @@ export function formatResult(task, options = {}) {
     lines.push(reviewerNotesExcerpt(task.reviewer?.notes));
     lines.push("(use --verbose for full reviewer notes)");
   }
+  lines.push("");
+  lines.push("Next steps:");
+  for (const hint of taskGuidance(task)) {
+    lines.push(`- ${hint}`);
+  }
+  return lines.join("\n");
+}
+
+function formatResearchResult(task, options = {}) {
+  const workspaceRoot = options.workspaceRoot ?? task.workspaceRoot ?? process.cwd();
+  const verbose = Boolean(options.verbose);
+  const lines = [
+    `Task: ${task.taskId}`,
+    `Status: ${task.status}`,
+    `Research question: ${task.objective}`
+  ];
+  if (task.options?.focus) {
+    lines.push(`Focus: ${task.options.focus}`);
+  }
+  lines.push("", "Research outputs:");
+  if (!task.research?.length) {
+    lines.push("- none recorded yet");
+  } else {
+    for (const entry of task.research) {
+      lines.push("", `${workerDisplayName(entry.worker)}:`);
+      lines.push(`Status: ${entry.status}`);
+      if (verbose && entry.transcript) {
+        lines.push(`Transcript: ${relativePath(workspaceRoot, entry.transcript)}`);
+      }
+      lines.push(entry.notes ?? "(no notes)");
+    }
+  }
+  lines.push("");
+  lines.push("Main agent guidance:");
+  lines.push("- Continue or complete your own repo investigation.");
+  lines.push("- Treat Composer findings as evidence-backed leads, not authority.");
+  lines.push("- Cross-check important claims against the cited files or commands before acting.");
   lines.push("");
   lines.push("Next steps:");
   for (const hint of taskGuidance(task)) {

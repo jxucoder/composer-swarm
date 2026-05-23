@@ -11,6 +11,7 @@ import {
   builderRoles,
   cancelTask,
   cleanupTasks,
+  createResearchTask,
   createTeamTask,
   defaultConfig,
   resolveWorkspaceContext,
@@ -20,6 +21,7 @@ import {
   recordBackgroundPid,
   renderResult,
   renderStatus,
+  researchRoles,
   reviewObjective,
   runDoctor,
   runTaskWorkflow,
@@ -41,6 +43,7 @@ Usage:
   composer-swarm doctor
   composer-swarm plan <task text>
   composer-swarm team <task text> [--builders 2] [--background|--wait]
+  composer-swarm research <question> [--workers 2] [--focus <area>] [--background|--wait]
   composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
   composer-swarm status [task-id]
   composer-swarm result [task-id] [--verbose]
@@ -128,6 +131,7 @@ function setupReport(cwd, options = {}) {
   }
   if (ready) {
     nextSteps.push('Start a team: composer-swarm team "fix the failing tests" --background');
+    nextSteps.push('Research only: composer-swarm research "map the relevant flow" --background');
     nextSteps.push("Review only: composer-swarm review --preset repo --background");
   }
 
@@ -219,6 +223,40 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
   return finished;
 }
 
+async function runResearchCommand(config, workspaceRoot, question, options) {
+  const workers = options.workers ? Number(options.workers) : 2;
+  if (!Number.isInteger(workers) || workers < 1 || workers > researchRoles(99).length) {
+    console.error("Invalid --workers value. Use an integer from 1 to 4.");
+    process.exitCode = 2;
+    return null;
+  }
+  if (options.background && options.wait) {
+    console.error("Use only one of --background or --wait.");
+    process.exitCode = 2;
+    return null;
+  }
+  const task = createResearchTask(config, workspaceRoot, question, {
+    workers,
+    focus: options.focus ?? null,
+    model: options.model ?? null,
+    background: Boolean(options.background)
+  });
+  if (options.background) {
+    const pid = spawnBackgroundTask(workspaceRoot, task.taskId);
+    recordBackgroundPid(config, workspaceRoot, task.taskId, pid);
+    console.log(`Started ${task.taskId} in background.`);
+    console.log(`Status: composer-swarm status ${task.taskId}`);
+    console.log(`Result: composer-swarm result ${task.taskId} --verbose`);
+    return task;
+  }
+  console.log(`Started ${task.taskId}.`);
+  const finished = await runTaskWorkflow(config, workspaceRoot, task.taskId);
+  console.log(renderStatus(config, workspaceRoot, finished.taskId));
+  console.log("");
+  console.log(`Result: composer-swarm result ${finished.taskId} --verbose`);
+  return finished;
+}
+
 function spawnBackgroundTask(workspaceRoot, taskId) {
   const child = spawn(process.execPath, [cliPath(), "__run-task", taskId], {
     cwd: workspaceRoot,
@@ -306,6 +344,19 @@ async function main() {
     }
     const { workspaceRoot, config } = workspaceContext(cwd);
     await runTeamCommand(config, workspaceRoot, taskText, options);
+    return;
+  }
+
+  if (command === "research") {
+    const { options, positionals } = parseArgs(args, ["workers", "focus", "model"]);
+    const question = readTaskText(positionals);
+    if (!question) {
+      console.error("Missing research question.");
+      process.exitCode = 2;
+      return;
+    }
+    const { workspaceRoot, config } = workspaceContext(cwd);
+    await runResearchCommand(config, workspaceRoot, question, options);
     return;
   }
 
