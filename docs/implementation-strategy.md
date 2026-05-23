@@ -1,174 +1,149 @@
 # Implementation Strategy
 
-## Rethink
+Composer Swarm v1 is intentionally simple: a repo-local Node CLI with thin Claude Code and Codex adapters.
+The runtime exists to give a smart host agent fast Composer capacity without asking the user to switch apps.
 
-The first scaffold treated Claude Code, Codex, Composer, and shell agents as peers in one generic swarm.
-That is technically portable, but it is not the best distribution path.
+## Product Strategy
 
-The better product is:
-
-```text
-Your current agent + a team of Composer workers
-```
-
-Claude Code and Codex users already have a cockpit. The layer should make that cockpit better by giving it
-Composer capacity: multiple fast, low-cost workers for wider code search, additional thinking, isolated
-attempts, patch summaries, and a clean merge path.
-
-## Insight From The Grok Share
-
-The shared Grok conversation highlights a current pattern on X:
-
-- users want Claude/Codex to remain the main agent that plans, supervises, and reviews
-- users want Composer 2.5/Cursor to search, think, review, and execute quickly
-- official Claude Agent Teams do not make Codex or Composer native teammates
-- plugin-style delegation is the proven adoption path
-
-That means our layer should not compete with Claude Code Agent Teams or Codex. It should be the adapter
-that gives either host a Composer team.
-
-Source: https://x.com/i/grok/share/513b827b6d264c15a7c2e1ecb0ceef98
-
-## User Promise
-
-For Claude Code:
+The product should feel like:
 
 ```text
-/composer:team fix the failing checkout flow
+your current coding agent + local Composer workers
 ```
 
-For Codex:
+Claude Code and Codex remain the cockpit. Composer 2.5 Fast workers add:
+
+- broader repo search
+- additional read-only reasoning
+- review-only critique
+- isolated implementation candidates
+- local transcripts, patches, and verification output
+
+## Current Entry Points
+
+Claude Code:
 
 ```text
-Use composer-swarm to run two Composer implementation attempts and a review pass.
+/composer:setup
+/composer:review --preset repo --include-untracked
+/composer:research map auth flow --workers 3
+/composer:team fix failing tests --builders 2
+/composer:status
+/composer:inspect
+/composer:logs
+/composer:result
+/composer:verify
+/composer:apply
 ```
 
-Expected result:
+Codex:
 
 ```text
-Composer team finished.
-
-Candidate A: smallest patch, tests pass.
-Candidate B: broader refactor, one conflict.
-Recommended: Candidate A.
-Apply it? y/n
+Use Composer Swarm to review my current changes.
+Use Composer Swarm to research how config loading works with three workers.
+Use Composer Swarm to fix the failing tests with two builders.
 ```
 
-## Technical Shape
+CLI:
 
-### 1. Host-Native Entry Points
-
-Claude Code plugin:
-
-- `/composer:team`
-- `/composer:research`
-- `/composer:status`
-- `/composer:result`
-- `/composer:apply`
-- `/composer:cancel`
-
-Codex skill/plugin:
-
-- tells Codex to call `composer-swarm`
-- gives Codex rules for reviewing candidate patches
-- lets Codex apply selected patches with ordinary repo tools
-
-### 2. Worktree-Isolated Composer Workers
-
-For each task:
-
-1. Snapshot the current repo state.
-2. Create N git worktrees under `.composer-swarm/state/worktrees/<task-id>/`.
-3. Start one `cursor-agent` process per worker with a task-specific prompt.
-4. Capture each worker's transcript, diff, status, and checks.
-5. Summarize candidates for the host.
-6. Apply the selected patch into the main checkout.
-
-This avoids multiple Composer workers fighting in the same working tree.
-
-### 3. Candidate Patch Model
-
-Each worker returns:
-
-```json
-{
-  "candidateId": "task_123-builder-a",
-  "worker": "builder-a",
-  "worktree": ".composer-swarm/state/worktrees/task_123/builder-a",
-  "summary": "Fixed checkout validation with a narrow guard.",
-  "patchFile": ".composer-swarm/state/artifacts/task_123-builder-a.patch",
-  "checks": [
-    {"command": "npm test -- checkout", "status": "passed"}
-  ],
-  "risk": "low"
-}
+```bash
+composer-swarm review --preset repo --include-untracked
+composer-swarm research "map auth token flow" --workers 3 --background
+composer-swarm team "fix flaky login test" --builders 2 --background
 ```
 
-### 4. Host Review Step
+## Mode Strategy
 
-Composer can review candidates, but the host should make the final recommendation:
+### Read-Only First
 
-- Claude Code can reason over summaries and ask to apply.
-- Codex can run an adversarial review before applying.
-- A generic host can print candidate metadata and wait for a manual choice.
+Read-only modes should be useful even in prototype repos:
 
-## Distribution Plan
+```bash
+composer-swarm review --preset repo --include-untracked
+composer-swarm research "review the current rewrite" --snapshot-current
+```
 
-### v1: Repo-Local First
+For `research` and `review`, dirty and untracked files are snapshotted into isolated worker worktrees. These
+modes never create candidate patches and never expose apply commands.
 
-Ship v1 as a repo-only release. Users clone this repository and install the local Claude plugin from
-[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json) or the Codex plugin from
-[`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json). Do not depend on npm publish or
-external marketplace submission yet.
+### Implementation When Clean
 
-### Claude Code First
+Implementation mode is stricter:
 
-Follow the pattern that made `codex-plugin-cc` and `cursor-plugin-cc` easy to adopt, but start with the
-repo-local marketplace in v1:
+```bash
+composer-swarm team "implement the requested change" --builders 2
+```
+
+`team` requires a clean checkout before it starts, aside from Composer Swarm runtime state. This avoids
+candidate patches that accidentally include unrelated user work.
+
+### Apply After Inspection
+
+The apply path stays explicit:
+
+```bash
+composer-swarm result <task-id> --verbose
+composer-swarm verify <task-id>
+composer-swarm apply <task-id> --candidate <candidate-id>
+```
+
+The host should inspect the patch and verification output before applying exactly one candidate.
+
+## Runtime Strategy
+
+The runtime owns the hard parts:
+
+- resolve the target git workspace
+- read `.composer-swarm/config.json`
+- create isolated worktrees
+- snapshot dirty read-only checkouts when needed
+- launch `cursor-agent` with `composer-2.5-fast`
+- record worker JSONL transcripts
+- collect candidate patch artifacts
+- verify candidates against configured shell checks
+- apply one selected patch after approval
+- clean up task worktrees
+
+Adapters should stay thin. Claude command files and the Codex skill should translate user intent into CLI
+commands, then return CLI output without inventing extra state.
+
+## Distribution Strategy
+
+### v1: Repo-Only
+
+Users clone this repository and install local adapters from the checkout. Do not publish to npm or external
+marketplaces until the CLI and docs are stable.
+
+Claude Code install:
 
 ```text
 /plugin marketplace add /path/to/composer-swarm/.claude-plugin/marketplace.json
 /plugin install composer@jxucoder-composer-swarm
-/composer:setup
-/composer:team ...
+/reload-plugins
 ```
 
-External marketplace install (`/plugin marketplace add <publisher>/composer-swarm`) is deferred until after
-the repo-only CLI and local plugin flow are stable.
-
-The Claude plugin should be thin. It calls the CLI and returns stdout.
-
-### Codex Second
-
-Ship a Codex skill:
-
-```text
-composer-swarm
-  - how to check setup
-  - how to start a team
-  - how to inspect candidates
-  - how to ask before applying the selected patch
-```
-
-Codex users should not need to learn Claude plugin mechanics.
-
-### Generic CLI Third
-
-Keep the raw CLI useful:
+Codex install:
 
 ```bash
-composer-swarm team "fix flaky login test" --builders 2
-composer-swarm research "map auth token flow" --workers 3 --background
-composer-swarm status
-composer-swarm result
-composer-swarm apply task_123 --candidate builder-a
+mkdir -p ~/.codex/skills/composer-swarm ~/.local/bin
+cp /path/to/composer-swarm/skills/composer-swarm/SKILL.md ~/.codex/skills/composer-swarm/SKILL.md
+ln -sfn /path/to/composer-swarm/bin/composer-swarm.mjs ~/.local/bin/composer-swarm
 ```
 
-## What Not To Build First
+### Later
 
-- Do not start with a full multi-vendor social protocol.
-- Do not depend on Claude Agent Teams for Composer workers.
-- Do not make users switch into a new app.
+Only after v1 is stable:
+
+- npm package
+- external Claude plugin marketplace submission
+- MCP wrapper for hosts that cannot shell out
+- richer progress if `cursor-agent` exposes structured phases
+
+## Non-Goals
+
+- Do not build a separate coordination app.
+- Do not depend on native Claude Agent Teams for Composer workers.
+- Do not make Codex and Claude mandatory; they are host surfaces.
 - Do not run multiple editing workers in the same checkout.
-- Do not make Codex and Claude mandatory. They are host surfaces and optional reviewers.
-- Do not ship npm, marketplace, or MCP support before the repo-only CLI is stable.
+- Do not expose a role/persona system to users.
+- Do not auto-merge or auto-apply.

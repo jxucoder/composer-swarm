@@ -11,7 +11,7 @@ without depending on the Python package. OpenAI Swarm is intentionally lightweig
 Swarm copies the primitives rather than the dependency:
 
 - **Routine:** The Codex skill or Claude command file is the host routine. It tells the main agent when to
-  call setup, research, team, status, result, verify, apply, and cleanup.
+  call setup, research, review, team, status, inspect, logs, result, verify, apply, cancel, and cleanup.
 - **Tools:** CLI commands are the tool boundary. The host agent invokes `composer-swarm` commands and receives
   structured task state, transcripts, patches, and verifier output.
 - **Handoff:** Starting a Composer worker is a handoff from the host agent to an isolated worker process. The
@@ -145,9 +145,9 @@ Dirty-check behavior is mode-specific:
 |---|---|
 | `research` | Allowed; snapshots current tracked and untracked files into read-only worker worktrees |
 | `review` | Allowed; snapshots current tracked and untracked files into read-only worker worktrees |
-| `team` | Blocked until the main checkout is clean |
+| `team` | Blocked until the main checkout is clean, aside from Composer Swarm runtime state |
 | `verify` | Runs against stored candidate worktrees |
-| `apply` | Blocked until the main checkout is clean |
+| `apply` | Blocked until the main checkout is clean, aside from Composer Swarm runtime state |
 
 ## Research
 
@@ -267,13 +267,14 @@ composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm apply <task-id> --recommended
 ```
 
-Apply requires a clean tracked checkout and checks whether the patch applies cleanly before changing files.
+Apply requires a clean checkout, aside from Composer Swarm runtime state, and checks whether the patch applies
+cleanly before changing files.
 
 ## Repo Targeting
 
 If the current directory is not inside a git repository, Composer Swarm searches nearby directories and
-suggests `cd` paths to nested git repos. Read-only commands such as `status`, `result`, and `cleanup` can run
-without a git checkout.
+suggests `cd` paths to nested git repos. Local-state commands such as `ls`, `status`, `inspect`, `logs`,
+`result`, and `cleanup` can run without a git checkout when task state is available.
 
 ## Host Adapters
 
@@ -299,8 +300,9 @@ background mode remains the local detached runner described above.
 
 Codex plugin metadata lives in `.agents/plugins/marketplace.json`, and the Codex skill lives in
 `skills/composer-swarm/SKILL.md`. Codex environments must explicitly support and install local skills or
-plugins before they will use that file. The skill requires Codex to inspect results and ask before running
-`apply`.
+plugins before they will use that file. For manual skill installs, copy `SKILL.md` into
+`~/.codex/skills/composer-swarm/` and put `bin/composer-swarm.mjs` on `PATH`. The skill requires Codex to
+inspect results and ask before running `apply`.
 
 ## Plugin Runtime Resolution
 

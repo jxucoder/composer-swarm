@@ -1,122 +1,131 @@
 # Architecture
 
-## Goal
+Composer Swarm is a repo-local ComposerDelegate runtime. Claude Code or Codex stays in charge; local
+Cursor/Composer workers provide breadth for read-only research, read-only review, and isolated implementation
+candidates.
 
-Composer Swarm should let users already working in Claude Code, Codex, or another coding assistant add a
-team of Cursor/Composer workers.
-
-The product should feel like a native extension of the user's current host:
-
-- Claude Code user: `/composer:team ...`
-- Codex user: `Use composer-swarm to run this through a Composer team`
-- Generic agent user: `composer-swarm team ...`
-
-The key implementation shift is that Claude Code and Codex are not the default workers. They are the
-operator surfaces. Cursor/Composer workers are the team.
-
-## Product Insight
-
-The X/Grok thread points to three useful facts:
-
-- Developers like the main-agent/worker split: Claude or Codex can supervise while fast Composer workers
-  search, think, review, and draft candidate patches in parallel.
-- Claude Code Agent Teams are not a native way to add non-Claude teammates, so we should not depend on
-  that path for distribution.
-- The successful adoption pattern is host-native commands, like `codex-plugin-cc` and `cursor-plugin-cc`,
-  not a separate coordination app users must switch into.
-
-Source: https://x.com/i/grok/share/513b827b6d264c15a7c2e1ecb0ceef98
-
-## Layers
-
-### 1. Host Cockpit
-
-The host cockpit is where the user already is:
-
-- Claude Code
-- Codex
-- another CLI or IDE agent
-
-Host integrations should be thin and native. They should expose a few commands and then call the runtime.
-
-Claude Code:
+## Product Shape
 
 ```text
-/composer:team
+User
+  -> Claude Code, Codex, or a CLI caller
+    -> Composer Swarm command or skill
+      -> composer-swarm Node CLI
+        -> cursor-agent workers using composer-2.5-fast
+          -> read-only snapshots or isolated git worktrees
+```
+
+The host agent owns planning judgment, result interpretation, final verification, and apply. Composer workers
+do not apply patches or own final decisions.
+
+## Host Surfaces
+
+Claude Code exposes slash commands:
+
+```text
+/composer:setup
+/composer:review
 /composer:research
+/composer:team
 /composer:status
+/composer:inspect
+/composer:logs
 /composer:result
 /composer:verify
+/composer:apply
 /composer:cancel
 ```
 
-Codex:
+Codex uses the installed `composer-swarm` skill. The skill tells Codex when to call the CLI, how many workers
+to use, how to inspect results, and when to ask before applying.
 
-```text
-composer-swarm skill: run a Composer team, inspect results, merge selected patch
+Generic users can call the same runtime directly:
+
+```bash
+composer-swarm review --preset repo --include-untracked
+composer-swarm research "map auth token flow" --workers 3 --background
+composer-swarm team "fix flaky login test" --builders 2 --background
 ```
 
-### 2. Core Runtime
+## Runtime
 
-The core runtime is a repo-aware CLI and optional daemon:
+The CLI is the runtime. It resolves the target git workspace, reads config, creates worktrees, launches
+workers, records transcripts, stores candidate patches, verifies candidates, and applies exactly one approved
+patch.
 
-```text
-composer-swarm
-  init
-  setup
-  doctor
-  plan
-  team
-  status
-  result
-  verify
-  apply
-  cancel
-  cleanup
-```
-
-Responsibilities:
-
-- resolve workspace root
-- load `.composer-swarm/config.json`
-- maintain task state
-- create isolated worktrees for Composer workers
-- assign leases and scopes
-- record event transcripts
-- collect artifacts and summaries
-- collect candidate patches
-- help the host select and merge the best patch
-- expose the same commands to all hosts
-
-The runtime should not try to be an all-purpose agent team. Its first job is to make Composer delegation
-reliable from existing hosts.
-
-### 3. Composer Worker Pool
-
-Composer workers are launched through `cursor-agent` or a compatible Cursor/Composer CLI and pinned to
-Cursor model `composer-2.5-fast`.
-
-The user config only names the Composer CLI command and optional verifier command. The runtime picks the
-worker shape from command flags: `team --builders <1-4>` for implementation work, `research --workers
-<1-4>` for read-only repo research, and `review --scouts <0-4>` for read-only review work.
-
-Every worker adapter implements the same contract:
+Current commands:
 
 ```text
-input:  task envelope + workspace context + worker instructions
-output: JSONL events + final result envelope
+setup
+doctor
+plan
+review
+research
+team
+ls
+status
+inspect
+logs
+result
+verify
+apply
+cancel
+cleanup
+config
+example-config
 ```
 
-Adapters can be implemented using:
+There is no daemon, MCP server, hosted background service, or separate task UI in v1.
 
-- direct CLI process spawning
-- MCP tool calls
-- HTTP services
-- manual/human workers
+## Worker Model
+
+Workers are launched through `cursor-agent` and pinned to `composer-2.5-fast`.
+
+Read-only workers run in Cursor plan mode:
+
+- `research-*`
+- `planner`
+- `scout-*`
+- `reviewer`
+
+Implementation workers can edit their isolated worktree:
+
+- `builder-a`
+- `builder-b`
+- `builder-c`
+- `builder-d`
+
+Worker labels are runtime labels, not user-configured personas or roles.
+
+## Task Modes
+
+### Research
+
+`research` runs one to four read-only workers. It produces evidence for the host agent and has no candidate
+patches, verifier checks, recommendation, or apply path.
+
+Dirty or untracked checkouts are allowed. The runtime snapshots current tracked modifications and untracked
+files into each read-only worker worktree.
+
+### Review
+
+`review` runs a read-only planner, optional read-only scouts, and a read-only reviewer. It is designed for
+repository review and the common "review my current changes before I commit" workflow.
+
+Dirty or untracked checkouts are allowed and snapshotted into worker worktrees. Review workers are prompted
+to return structured findings with severity, file, issue, rationale, suggested fix, and evidence.
+
+### Team
+
+`team` runs a planner, one to four builders, and a reviewer. The main checkout must be clean before the task
+starts, aside from Composer Swarm runtime state. Each builder edits a separate git worktree and the runtime
+collects the diff as a candidate patch.
+
+The reviewer can recommend a candidate, but the host/user must inspect and approve before `apply`.
 
 ## State Layout
 
-Repo-local state is useful for collaboration, but runtime metadata should be easy to ignore:
+Runtime state lives in the target repository:
 
 ```text
 .composer-swarm/
@@ -128,65 +137,38 @@ Repo-local state is useful for collaboration, but runtime metadata should be eas
     worktrees/<task-id>/<worker-label>/
 ```
 
-Recommended `.gitignore`:
+Commit `.composer-swarm/config.json` when useful. Ignore `.composer-swarm/state/`.
 
-```text
-.composer-swarm/state/
+## Local Background Mode
+
+`--background` starts a detached local Node process and records progress under `.composer-swarm/state/`.
+Users inspect it with:
+
+```bash
+composer-swarm status <task-id>
+composer-swarm inspect <task-id>
+composer-swarm logs <task-id> --worker <label>
+composer-swarm result <task-id> --verbose
 ```
 
-Commit `.composer-swarm/config.json` when the team configuration is useful. Ignore `.composer-swarm/state/`.
+This is not Cursor Background Agents, a hosted Codex task, or a managed job queue.
 
-## Task Lifecycle
+## Apply Boundary
 
-```text
-created -> running -> patches-collected -> completed -> applied|failed|cancelled
-```
+`apply` is intentionally narrow:
 
-Each task has:
+- requires a clean checkout, aside from Composer Swarm runtime state
+- applies exactly one selected candidate patch
+- checks that the patch applies cleanly first
+- never runs for research or review tasks
 
-- task id
-- objective
-- acceptance criteria
-- allowed files or scope
-- parent task id
-- worktree path
-- lease holder
-- events
-- final result
+`--recommended` is only a shortcut after inspecting the detected reviewer recommendation.
 
-## Isolation
+## Non-Goals For V1
 
-The swarm should prefer isolated git worktrees over shared-checkout file locks.
-
-Each Composer worker gets its own worktree:
-
-```text
-.composer-swarm/state/worktrees/task_123/builder-a
-.composer-swarm/state/worktrees/task_123/builder-b
-```
-
-The runtime collects each worker's patch with `git diff`, then the host reviews and applies one selected
-patch to the main checkout.
-
-File leases still matter for scoped subtasks.
-
-Lease shape:
-
-```json
-{
-  "taskId": "task_123",
-  "workerId": "composer-builder-a",
-  "paths": ["src/auth/**"],
-  "expiresAt": "2026-05-22T20:00:00.000Z"
-}
-```
-
-If two workers need the same paths, the coordinator should serialize them or split the task.
-
-## Recommended MVP
-
-1. Ship `composer-swarm` as a repo-only CLI that can create worktrees and launch `cursor-agent`.
-2. Ship a local Claude Code plugin with `/composer:setup`, `/composer:team`, `/composer:research`, `/composer:review`, `/composer:status`, `/composer:result`, `/composer:verify`, `/composer:apply`, and `/composer:cancel`.
-3. Ship a Codex plugin/skill that calls the same CLI and asks before applying patches.
-4. List candidate patches, summaries, changed files, checks, and reviewer notes.
-5. Defer MCP until the CLI worker loop is stable.
+- No native Claude Agent Teams dependency.
+- No hosted background task UI.
+- No MCP server yet.
+- No npm publish or external marketplace submission yet.
+- No user-facing role/persona system.
+- No automatic merge or auto-apply.

@@ -1,139 +1,178 @@
 # Worker Protocol
 
-Composer Swarm uses JSONL for worker events. JSONL is easy for every CLI worker to emit and easy for host
-integrations to parse incrementally.
+Composer Swarm v1 records worker transcripts as JSONL. The transcript format is intentionally simple because
+`cursor-agent --output-format stream-json` already emits a stream of JSON events.
 
-The protocol is centered on candidate patches. Multiple Composer workers may attempt the same task in
-isolated worktrees; the host later chooses which candidate to apply.
+The runtime wraps that stream with task metadata and stores it under:
 
-## Task Envelope
-
-```json
-{
-  "schema": "composer-swarm.task.v1",
-  "taskId": "task_01",
-  "candidateId": "task_01-builder-a",
-  "workspaceRoot": "/path/to/repo",
-  "worktreeRoot": ".composer-swarm/state/worktrees/task_01/builder-a",
-  "worker": "builder-a",
-  "objective": "Fix the checkout regression with the smallest coherent patch.",
-  "acceptanceCriteria": [
-    "Keep the patch narrowly scoped",
-    "Run the relevant checkout tests if available",
-    "Return a patch summary and risk assessment"
-  ],
-  "context": {
-    "baseRef": "main",
-    "focus": "checkout validation regression"
-  },
-  "limits": {
-    "canEdit": true,
-    "canRunCommands": true,
-    "network": false
-  }
-}
+```text
+.composer-swarm/state/transcripts/<task-id>/<worker-label>.jsonl
 ```
 
-## Event Types
-
-All adapter output should be newline-delimited JSON.
+## Transcript Events
 
 ### `started`
 
-```json
-{"type":"started","taskId":"task_01","candidateId":"task_01-builder-a","workerId":"composer-builder-a","timestamp":"2026-05-22T19:00:00.000Z"}
-```
-
-### `progress`
-
-```json
-{"type":"progress","taskId":"task_01","candidateId":"task_01-builder-a","phase":"editing","message":"Updating checkout validation"}
-```
-
-### `claim`
-
-```json
-{"type":"claim","taskId":"task_01","candidateId":"task_01-builder-a","paths":["src/checkout/**"],"ttlSeconds":600}
-```
-
-### `candidate`
+Written before the worker process starts:
 
 ```json
 {
-  "type": "candidate",
-  "taskId": "task_01",
-  "candidateId": "task_01-builder-a",
+  "timestamp": "2026-05-23T00:00:00.000Z",
+  "type": "started",
+  "taskId": "task_abc",
   "worker": "builder-a",
-  "summary": "Fixed checkout validation with a narrow guard.",
-  "risk": "low",
-  "patchFile": ".composer-swarm/state/artifacts/task_01-builder-a.patch",
-  "worktree": ".composer-swarm/state/worktrees/task_01/builder-a",
-  "checks": [
-    {"command": "npm test -- checkout", "status": "passed"}
-  ]
+  "agentId": "composer",
+  "command": "cursor-agent",
+  "args": ["--trust", "--print", "--output-format", "stream-json", "--workspace", "...", "--model", "composer-2.5-fast", "<prompt>"]
 }
 ```
 
-### `review`
+The stored args redact the full prompt in task JSON. Transcript `started` events preserve the same redacted
+shape.
+
+### `worker-output`
+
+Written for each stdout or stderr line from `cursor-agent`:
 
 ```json
 {
-  "type": "review",
-  "taskId": "task_01",
-  "candidateId": "task_01-builder-a",
-  "status": "accepted",
-  "summary": "Candidate A is narrow and has relevant test coverage.",
-  "findings": []
+  "timestamp": "2026-05-23T00:00:01.000Z",
+  "type": "worker-output",
+  "taskId": "task_abc",
+  "worker": "builder-a",
+  "stream": "stdout",
+  "event": {"type": "final", "text": "Implemented the requested change."}
 }
 ```
 
-### `selection`
+If a line is not JSON, it is stored as:
 
 ```json
 {
-  "type": "selection",
-  "taskId": "task_01",
-  "selectedCandidateId": "task_01-builder-a",
-  "reason": "Smallest patch with passing checks"
+  "timestamp": "2026-05-23T00:00:01.000Z",
+  "type": "worker-output",
+  "taskId": "task_abc",
+  "worker": "builder-a",
+  "stream": "stderr",
+  "line": "plain text output"
 }
 ```
 
-### `error`
+### `retry`
+
+Written when the runtime retries the known Cursor CLI config rename race:
 
 ```json
-{"type":"error","taskId":"task_01","candidateId":"task_01-builder-a","message":"cursor-agent is not authenticated","retryable":false}
+{
+  "timestamp": "2026-05-23T00:00:02.000Z",
+  "type": "retry",
+  "taskId": "task_abc",
+  "worker": "builder-b",
+  "reason": "cursor-cli-config-race",
+  "nextAttempt": 2
+}
 ```
 
-## Adapter Invocation
+### `timeout`
 
-Every adapter receives the task envelope through one of these mechanisms:
+Written when a worker produces no output before the configured idle timeout:
 
-1. `--task-file <path>`
-2. stdin JSON
-3. MCP tool argument
-4. HTTP request body
+```json
+{
+  "timestamp": "2026-05-23T00:05:00.000Z",
+  "type": "timeout",
+  "taskId": "task_abc",
+  "worker": "research-b",
+  "idleTimeoutMs": 300000,
+  "lastOutputAt": null,
+  "error": "Worker research-b produced no output for 5m..."
+}
+```
 
-The CLI should prefer `--task-file` for long prompts and reproducibility.
+### Terminal Worker Status
+
+The final transcript event for a worker is one of:
+
+- `completed`
+- `failed`
+- `cancelled`
 
 Example:
 
-```bash
-composer-swarm adapter run composer-builder --task-file .composer-swarm/state/tasks/task_01-builder-a.json
+```json
+{
+  "timestamp": "2026-05-23T00:00:10.000Z",
+  "type": "completed",
+  "taskId": "task_abc",
+  "worker": "builder-a",
+  "exitCode": 0,
+  "signal": null,
+  "error": null
+}
 ```
 
-## Final Result Contract
+## Task JSON
 
-Every candidate must end with exactly one terminal event:
+The task file is the durable source of truth:
 
-- `candidate`
-- `review`
-- `error`
+```text
+.composer-swarm/state/tasks/<task-id>.json
+```
 
-Every task must end with a host-visible task result:
+It records:
 
-- selected candidate
-- applied patch status
-- checks that passed or failed
-- any unresolved conflicts or blocked work
+- objective
+- status
+- base commit and branch
+- mode options
+- worker states
+- research outputs
+- scout notes
+- reviewer notes
+- candidates
+- selected candidate after apply
 
-This lets Claude Code, Codex, or a generic host show results without understanding worker internals.
+Research and review tasks can have `options.snapshotCurrent: true` when the runtime snapshots dirty or
+untracked files into read-only worker worktrees.
+
+## Candidate Artifacts
+
+Only `team` tasks produce candidate patches. The runtime collects each completed builder worktree with
+`git diff --binary HEAD` and writes:
+
+```text
+.composer-swarm/state/artifacts/<task-id>/<candidate-id>.patch
+```
+
+Candidate metadata is stored in the task JSON:
+
+```json
+{
+  "schema": "composer-swarm.candidate.v1",
+  "candidateId": "task_abc-builder-a",
+  "workerLabel": "builder-a",
+  "status": "completed",
+  "summary": "Fixed checkout validation with a narrow guard.",
+  "patchFile": ".composer-swarm/state/artifacts/task_abc/task_abc-builder-a.patch",
+  "patchBytes": 1234,
+  "changedFiles": ["src/checkout.js"],
+  "worktree": ".composer-swarm/state/worktrees/task_abc/builder-a",
+  "transcript": ".composer-swarm/state/transcripts/task_abc/builder-a.jsonl",
+  "checks": []
+}
+```
+
+Research and review tasks do not produce candidate patches and never print apply commands.
+
+## Host Display
+
+Hosts should use the CLI for display instead of parsing task JSON directly:
+
+```bash
+composer-swarm status <task-id>
+composer-swarm inspect <task-id>
+composer-swarm logs <task-id> --worker <label>
+composer-swarm result <task-id> --verbose
+```
+
+This keeps Claude Code, Codex, and generic shell users on the same result format.

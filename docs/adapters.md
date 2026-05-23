@@ -1,7 +1,7 @@
 # Host And Agent Adapters
 
 Composer Swarm is host-first: Claude Code or Codex is the user's cockpit, while Cursor/Composer workers
-provide fast parallel search, extra reasoning, review passes, and candidate execution.
+provide fast parallel search, extra reasoning, review passes, and candidate patch attempts.
 
 ## Adapter Model
 
@@ -34,14 +34,14 @@ Claude Code should use slash commands that call the runtime:
 ```text
 /composer:setup
 /composer:team [task]
-/composer:research [question] [--workers 1..4] [--focus architecture|tests|security|docs|release]
-/composer:review [--preset repo|security|tests] [--scouts 0..4]
+/composer:research [question] [--workers 1..4] [--focus architecture|tests|security|docs|release] [--include-untracked|--snapshot-current]
+/composer:review [--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current]
 /composer:status [task-id]
 /composer:inspect [task-id]
 /composer:logs [task-id] [--worker <label>] [--tail 80]
 /composer:result [task-id]
 /composer:verify <task-id>
-/composer:apply [task-id] [--candidate <id>|--recommended]
+/composer:apply <task-id> --candidate <id>|--recommended
 /composer:cancel [task-id]
 ```
 
@@ -81,9 +81,15 @@ Codex environments that support local skills or plugins should get a skill with 
 - apply the selected patch through `composer-swarm apply` only after explicit user approval
 
 Codex does not automatically load the repo-root skill just because the repository was cloned. Install the
-repo-local Codex plugin from `.agents/plugins/marketplace.json`, or copy `skills/composer-swarm/SKILL.md`
-into the skills directory your Codex setup uses. Keep the plugin-packaged skill copy in sync with the
-repo-root skill file.
+repo-local Codex plugin from `.agents/plugins/marketplace.json`, or copy the skill and put the CLI on `PATH`:
+
+```bash
+mkdir -p ~/.codex/skills/composer-swarm ~/.local/bin
+cp /path/to/composer-swarm/skills/composer-swarm/SKILL.md ~/.codex/skills/composer-swarm/SKILL.md
+ln -sfn /path/to/composer-swarm/bin/composer-swarm.mjs ~/.local/bin/composer-swarm
+```
+
+Restart Codex after installing. Keep the plugin-packaged skill copy in sync with the repo-root skill file.
 
 This lets Codex users get Composer parallelism without leaving Codex.
 
@@ -119,14 +125,21 @@ commands.
 
 ## MCP Server Wrapper Future Work
 
-There is no MCP server in repo-only v1. A later MCP server should expose the same runtime operations:
+There is no MCP server in repo-only v1. A later MCP server should wrap the same runtime operations instead of
+introducing a second orchestration model:
 
-- `swarm_create_task`
-- `swarm_list_tasks`
-- `swarm_create_candidate_worktree`
-- `swarm_append_event`
-- `swarm_complete_candidate`
-- `swarm_get_result`
-- `swarm_apply_candidate`
+- `setup`
+- `research`
+- `review`
+- `team`
+- `ls`
+- `status`
+- `inspect`
+- `logs`
+- `result`
+- `verify`
+- `apply`
+- `cancel`
+- `cleanup`
 
 MCP is the best path for agents that cannot safely shell out but can call tools.

@@ -9,8 +9,8 @@ Licensed under [MIT](../LICENSE). Requires Node `>=20.0.0` (`package.json` `engi
 Clone the repo and call the CLI with Node:
 
 ```bash
-git clone <composer-swarm-repo-url>
-node /path/to/composer-swarm/bin/composer-swarm.mjs setup
+git clone https://github.com/jxucoder/composer-swarm.git
+node /path/to/composer-swarm/bin/composer-swarm.mjs setup --init --trust
 ```
 
 Optional shell convenience:
@@ -26,7 +26,7 @@ alias composer-swarm='node /path/to/composer-swarm/bin/composer-swarm.mjs'
 - authenticated `cursor-agent`
 - Cursor model `composer-2.5-fast` for all Composer workers
 - a target project that is a git repository
-- clean tracked files before `team` and before `apply`
+- a clean checkout before `team` and before `apply`, aside from Composer Swarm runtime state
 - dirty or untracked files are allowed for read-only `research` and `review`; they are snapshotted into
   worker worktrees
 
@@ -101,11 +101,18 @@ the runtime's portable background behavior is the detached local process describ
 
 ## Codex Plugin And Skill
 
-If your Codex environment supports local skills or plugins, install the repo-local Codex plugin from
-[`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), or copy
-[`skills/composer-swarm/SKILL.md`](../skills/composer-swarm/SKILL.md) into the skills directory your Codex
-setup uses. The plugin-packaged copy lives at `plugins/composer-swarm/skills/composer-swarm/SKILL.md` and
-should stay identical to the repo-root skill file.
+If your Codex environment supports local plugins, install the repo-local Codex plugin from
+[`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json). For a manual skill install, copy the
+skill and put the CLI on `PATH`:
+
+```bash
+mkdir -p ~/.codex/skills/composer-swarm ~/.local/bin
+cp /path/to/composer-swarm/skills/composer-swarm/SKILL.md ~/.codex/skills/composer-swarm/SKILL.md
+ln -sfn /path/to/composer-swarm/bin/composer-swarm.mjs ~/.local/bin/composer-swarm
+```
+
+Restart Codex after installing. The plugin-packaged copy lives at
+`plugins/composer-swarm/skills/composer-swarm/SKILL.md` and should stay identical to the repo-root skill file.
 
 The skill tells Codex to:
 
@@ -127,7 +134,7 @@ Runtime config lives at `.composer-swarm/config.json` in the target project. See
 - `workers.composer` configures the `cursor-agent` command used for Composer workers.
 - `verify` requires `workers.verifier`. The default config runs `npm test`.
 - Read-only `research` and `review` snapshot current dirty/untracked checkouts into isolated worktrees.
-  Implementation `team` and `apply` still require a clean checkout.
+  Implementation `team` and `apply` still require a clean checkout, aside from Composer Swarm runtime state.
 - Older `defaultRoles`, `agents[].role`, and `plan --roles` usage has been replaced by worker count flags:
   `team --builders`, `review --scouts`, and `research --workers`.
 - A top-level `policies` field is ignored if present; it is stripped during config load and has no effect in
@@ -170,6 +177,12 @@ Then, in a disposable git repository with authenticated `cursor-agent`:
 
 ```bash
 node /path/to/composer-swarm/bin/composer-swarm.mjs setup --init --trust
+mkdir -p src tests
+printf 'export const answer = 42;\n' > src/prototype.js
+printf 'import { answer } from "../src/prototype.js";\n\nconsole.log(answer);\n' > tests/prototype.test.js
+node /path/to/composer-swarm/bin/composer-swarm.mjs review --preset repo --include-untracked
+node /path/to/composer-swarm/bin/composer-swarm.mjs result <review-task-id> --verbose
+rm -rf src tests
 node /path/to/composer-swarm/bin/composer-swarm.mjs team "make a tiny safe edit" --builders 2
 node /path/to/composer-swarm/bin/composer-swarm.mjs result <task-id>
 ```
