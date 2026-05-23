@@ -75,7 +75,8 @@ alternate implementation attempts while the host agent owns final judgment.
 
 Research work uses one to four read-only Composer workers. It does not create candidates, verifier checks,
 recommendations, or apply commands. Research is designed to run while the host agent continues its own repo
-investigation and later reconciles the Composer evidence.
+investigation and later reconciles the Composer evidence. If one research worker fails or times out, completed
+worker outputs are still recorded so the host agent can use the partial evidence.
 
 Default implementation work uses one planning pass, one to four isolated implementation attempts, and one
 review pass. Review-only work uses one planning pass, optional read-only scout passes, and one review pass.
@@ -83,6 +84,9 @@ These worker labels are runtime state, not user-configured personas.
 
 Planning, research, scout, and review passes run in Cursor plan mode. Implementation workers run with edit
 access inside isolated git worktrees only.
+
+Workers have a conservative inactivity timeout so a silent `cursor-agent` process cannot block a task
+indefinitely. Timed-out workers are marked failed with the timeout reason in task status and transcripts.
 
 ## CLI Reference
 

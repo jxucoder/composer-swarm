@@ -149,6 +149,27 @@ console.log(JSON.stringify({ type: "final", text: workerLabel === "reviewer" ? "
   return { scriptPath };
 }
 
+function makeHangingResearchAgent() {
+  const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-hang-"));
+  const scriptPath = path.join(fakeDir, "fake-hanging-cursor-agent.mjs");
+  fs.writeFileSync(
+    scriptPath,
+    `#!/usr/bin/env node
+const prompt = process.argv.at(-1);
+const workerLabel = /Worker label: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
+
+if (workerLabel === "research-b") {
+  setInterval(() => {}, 1000);
+} else {
+  console.log(JSON.stringify({ type: "final", text: workerLabel + " done" }));
+}
+`,
+    "utf8"
+  );
+  fs.chmodSync(scriptPath, 0o755);
+  return { scriptPath };
+}
+
 function configWithCursor(command) {
   const config = defaultConfig();
   return {
@@ -469,6 +490,47 @@ test("research workflow runs read-only workers without candidates or clean-check
   assert.doesNotMatch(resultText, /Apply:/);
   assert.doesNotMatch(renderStatus(config, repo, task.taskId), /Verify:/);
   assert.equal(fs.readFileSync(path.join(repo, "src", "app.txt"), "utf8"), "dirty main checkout\n");
+});
+
+test("research workflow times out idle workers and preserves completed notes", async () => {
+  const repo = makeRepo();
+  const fake = makeHangingResearchAgent();
+  const config = configWithCursor(fake.scriptPath);
+  config.swarm.workerIdleTimeoutMs = 1000;
+  config.swarm.workerTimeoutKillGraceMs = 50;
+
+  const task = createResearchTask(config, repo, "find stale docs", {
+    workers: 2,
+    taskId: "task_research_timeout"
+  });
+  await runTaskWorkflow(config, repo, task.taskId);
+
+  const stored = loadTask(config, repo, task.taskId);
+  assert.equal(stored.status, "failed");
+  assert.equal(stored.research.length, 2);
+
+  const completed = stored.research.find((entry) => entry.worker === "research-a");
+  const timedOut = stored.research.find((entry) => entry.worker === "research-b");
+  assert.equal(completed.status, "completed");
+  assert.match(completed.notes, /research-a done/);
+  assert.equal(timedOut.status, "failed");
+  assert.match(timedOut.error, /produced no output/);
+  assert.match(timedOut.notes, /did not provide notes/);
+
+  const timedOutWorker = stored.workers.find((worker) => worker.label === "research-b");
+  assert.equal("pid" in timedOutWorker, false);
+  assert.match(timedOutWorker.error, /produced no output/);
+  assert.match(fs.readFileSync(timedOutWorker.transcript, "utf8"), /"type":"timeout"/);
+
+  const statusText = renderStatus(config, repo, task.taskId);
+  assert.match(statusText, /research-b: failed/);
+  assert.match(statusText, /produced no output/);
+
+  const resultText = renderResult(config, repo, task.taskId, { verbose: true });
+  assert.match(resultText, /research pass A:/);
+  assert.match(resultText, /research pass B:/);
+  assert.match(resultText, /research-a done/);
+  assert.match(resultText, /produced no output/);
 });
 
 test("applyCandidate applies exactly one stored patch", async () => {

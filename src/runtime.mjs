@@ -13,6 +13,8 @@ const BUILDER_SUFFIXES = ["a", "b", "c", "d"];
 const SCOUT_SUFFIXES = ["a", "b", "c", "d"];
 const RESEARCH_SUFFIXES = ["a", "b", "c", "d"];
 const CURSOR_CONFIG_RACE_RETRY_DELAY_MS = 750;
+const DEFAULT_WORKER_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_WORKER_TIMEOUT_KILL_GRACE_MS = 2000;
 export const DEFAULT_CURSOR_MODEL = "composer-2.5-fast";
 
 export const REVIEW_PRESETS = {
@@ -922,6 +924,35 @@ function cleanWorkerOutput(output, prompt) {
   return text;
 }
 
+function configuredDurationMs(value, fallback) {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return fallback;
+  }
+  return Math.trunc(numeric);
+}
+
+function workerIdleTimeoutMs(config) {
+  return configuredDurationMs(config.swarm?.workerIdleTimeoutMs, DEFAULT_WORKER_IDLE_TIMEOUT_MS);
+}
+
+function workerTimeoutKillGraceMs(config) {
+  return configuredDurationMs(config.swarm?.workerTimeoutKillGraceMs, DEFAULT_WORKER_TIMEOUT_KILL_GRACE_MS);
+}
+
+function formatDuration(ms) {
+  if (ms % 60000 === 0) {
+    return `${ms / 60000}m`;
+  }
+  if (ms % 1000 === 0) {
+    return `${ms / 1000}s`;
+  }
+  return `${ms}ms`;
+}
+
 async function runCursorWorker(config, workspaceRoot, task, workerLabel, context = {}) {
   const worker = workerForLabel(task, workerLabel);
   const agent = agentForWorker(config, workerLabel) ?? fallbackCursorAgent(workerLabel);
@@ -935,10 +966,13 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
     model: task.options?.model ?? null
   });
   const args = [...(agent.args ?? []), ...cursorArgs];
+  const idleTimeoutMs = workerIdleTimeoutMs(config);
+  const timeoutKillGraceMs = workerTimeoutKillGraceMs(config);
+  const startedAt = new Date().toISOString();
 
   Object.assign(worker, {
     status: "running",
-    startedAt: new Date().toISOString(),
+    startedAt,
     worktree,
     transcript,
     command: agent.command,
@@ -962,11 +996,102 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
     let settled = false;
     let attempts = 0;
     let retryScheduled = false;
+    let idleTimer = null;
+    let forceKillTimer = null;
+    let timeoutDetail = null;
+
+    function clearTimer(timer) {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+
+    function clearWorkerTimers() {
+      clearTimer(idleTimer);
+      clearTimer(forceKillTimer);
+      idleTimer = null;
+      forceKillTimer = null;
+    }
+
+    function scheduleIdleTimer() {
+      clearTimer(idleTimer);
+      if (!idleTimeoutMs || settled || retryScheduled) {
+        idleTimer = null;
+        return;
+      }
+      idleTimer = setTimeout(() => {
+        handleIdleTimeout();
+      }, idleTimeoutMs);
+      idleTimer.unref?.();
+    }
+
+    function workerTimeoutError() {
+      const lastOutput = worker.lastOutputAt ?? "none";
+      const started = worker.startedAt ?? "unknown";
+      return `Worker ${workerLabel} produced no output for ${formatDuration(idleTimeoutMs)}. Last output: ${lastOutput}. Started: ${started}.`;
+    }
+
+    function saveWorkerProgress() {
+      if (safeLoadTask(config, workspaceRoot, task.taskId)?.status === "cancelled") {
+        task.status = "cancelled";
+        return;
+      }
+      saveTask(config, workspaceRoot, task);
+    }
+
+    function handleIdleTimeout() {
+      if (settled || retryScheduled) {
+        return;
+      }
+      if (safeLoadTask(config, workspaceRoot, task.taskId)?.status === "cancelled") {
+        task.status = "cancelled";
+        return;
+      }
+      timeoutDetail = {
+        error: workerTimeoutError(),
+        timedOut: true
+      };
+      appendTranscript(transcript, {
+        type: "timeout",
+        taskId: task.taskId,
+        worker: workerLabel,
+        idleTimeoutMs,
+        lastOutputAt: worker.lastOutputAt ?? null,
+        error: timeoutDetail.error
+      });
+      Object.assign(worker, {
+        status: "failed",
+        error: timeoutDetail.error
+      });
+      saveTask(config, workspaceRoot, task);
+      if (child?.pid) {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // The process may have already exited.
+        }
+        forceKillTimer = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // The process may have already exited.
+          }
+          finish("failed", { ...timeoutDetail, signal: "SIGKILL" });
+        }, timeoutKillGraceMs);
+        forceKillTimer.unref?.();
+      } else {
+        finish("failed", timeoutDetail);
+      }
+    }
 
     function recordLine(stream, line) {
       if (!line) {
         return;
       }
+      worker.lastOutputAt = new Date().toISOString();
       const parsed = parseJsonLine(line);
       const text = parsed ? textFromJson(parsed) : line;
       if (text) {
@@ -980,6 +1105,8 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
         event: parsed,
         line: parsed ? undefined : line
       });
+      saveWorkerProgress();
+      scheduleIdleTimer();
     }
 
     function canRetryStartup(status) {
@@ -1009,10 +1136,12 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
       if (retryScheduled) {
         return;
       }
-      if (canRetryStartup(status)) {
+      if (!detail.timedOut && canRetryStartup(status)) {
         retryScheduled = true;
+        clearWorkerTimers();
         outputParts.length = 0;
         delete worker.pid;
+        delete worker.lastOutputAt;
         appendTranscript(transcript, {
           type: "retry",
           taskId: task.taskId,
@@ -1028,6 +1157,7 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
         return;
       }
       settled = true;
+      clearWorkerTimers();
       const finalOutput = cleanWorkerOutput(outputParts.join("\n"), prompt);
       const current = safeLoadTask(config, workspaceRoot, task.taskId);
       const cancelled = current?.status === "cancelled";
@@ -1085,8 +1215,13 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
         finish("failed", { error: error instanceof Error ? error.message : String(error) });
       });
       child.on("close", (exitCode, signal) => {
-        finish(exitCode === 0 ? "completed" : "failed", { exitCode, signal });
+        if (timeoutDetail) {
+          finish("failed", { ...timeoutDetail, exitCode, signal });
+        } else {
+          finish(exitCode === 0 ? "completed" : "failed", { exitCode, signal });
+        }
       });
+      scheduleIdleTimer();
     }
 
     startAttempt();
@@ -1224,17 +1359,31 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       const researchWorkerList = task.workers
         .map(workerLabelFor)
         .filter((label) => label?.startsWith("research-"));
-      const researchWorkers = await Promise.all(
+      const settledResearchWorkers = await Promise.allSettled(
         researchWorkerList.map((label) => runCursorWorker(config, workspaceRoot, task, label))
       );
       if (isCancelled(config, workspaceRoot, task.taskId)) {
         return markCancelled(config, workspaceRoot, task);
       }
+      const researchWorkers = settledResearchWorkers.map((result, index) => {
+        if (result.status === "fulfilled") {
+          return result.value;
+        }
+        const label = researchWorkerList[index];
+        const worker = workerForLabel(task, label);
+        Object.assign(worker, {
+          status: "failed",
+          completedAt: new Date().toISOString(),
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason)
+        });
+        return worker;
+      });
       task.research = researchWorkers.map((worker) => ({
         worker: workerLabelFor(worker),
         status: worker.status,
         transcript: worker.transcript,
         notes: worker.finalOutput || "(research worker did not provide notes)",
+        error: worker.error ?? null,
         exitCode: worker.exitCode ?? null
       }));
       task.status = researchWorkers.some((worker) => worker.status === "failed") ? "failed" : "completed";
@@ -1683,6 +1832,8 @@ export function formatTaskStatus(task) {
     const label = workerLabelFor(worker) ?? "unknown";
     const detail = [
       worker.exitCode !== undefined && worker.exitCode !== null ? `exit=${worker.exitCode}` : null,
+      worker.lastOutputAt ? `last-output=${formatAge(worker.lastOutputAt)}` : null,
+      worker.error ? `error=${trimForSummary(worker.error)}` : null,
       worker.worktree ? `worktree=${worker.worktree}` : null
     ]
       .filter(Boolean)
@@ -1829,6 +1980,9 @@ function formatResearchResult(task, options = {}) {
     for (const entry of task.research) {
       lines.push("", `${workerDisplayName(entry.worker)}:`);
       lines.push(`Status: ${entry.status}`);
+      if (entry.error) {
+        lines.push(`Error: ${entry.error}`);
+      }
       if (verbose && entry.transcript) {
         lines.push(`Transcript: ${relativePath(workspaceRoot, entry.transcript)}`);
       }
