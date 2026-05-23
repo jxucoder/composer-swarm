@@ -19,7 +19,8 @@ Core constraints:
 
 Execution mode rules:
 - If the raw arguments include `--wait`, run in the foreground.
-- If the raw arguments include `--background`, run the review in a Claude background task.
+- If the raw arguments include `--background`, use Claude background Bash execution when available. The
+  runtime itself records a detached local run.
 - Otherwise, estimate review size before asking:
   - Run `git status --short --untracked-files=all`.
   - Repository reviews often take a while, so recommend background unless the repo/change is clearly tiny.
@@ -42,8 +43,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS"
 - Return stdout and stderr without summarizing or rewriting.
 - Do not act on review findings unless the user asks in a later message.
 
-Background flow:
-- Launch the review with `Bash` in the background:
+Detached/background flow:
+- Launch the wrapper with `Bash` background execution:
 ```typescript
 Bash({
   command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS"`,
@@ -52,7 +53,7 @@ Bash({
 })
 ```
 - Do not call `BashOutput` or wait for completion in this turn.
-- After launching the command, tell the user: "Composer Swarm review started in the background. Check `/composer:status` for progress."
+- After launching the command, tell the user: "Composer Swarm review started as a detached local run. Check `/composer:status` for progress."
 
 Output rules:
 - Present foreground stdout and stderr without summarizing or rewriting.

@@ -130,7 +130,8 @@ composer-swarm cleanup [task-id]
 ```
 
 `team` waits by default. `--background` starts a detached local runner and stores task state so `status` and
-`result` can inspect it later.
+`result` can inspect it later. This is local process detachment, not a hosted Cursor Background Agent,
+hosted Codex task, or managed task UI.
 
 `setup` checks git, config, Node, the configured Composer worker command, and the configured shell verifier
 command. `setup --init --trust` writes `.composer-swarm/config.json` with trusted Composer worker args.
@@ -217,7 +218,8 @@ Claude Code local plugin files live in `plugins/composer-swarm`. They expose:
 ```
 
 The command files copy the `codex-plugin-cc` pattern: preserve `$ARGUMENTS`, return foreground output
-verbatim, and use the host background task primitive for background runs.
+verbatim, and use host background command execution when the host provides it. The runtime's portable
+background mode remains the local detached runner described above.
 
 Codex plugin metadata lives in `.agents/plugins/marketplace.json`, and the Codex skill lives in
 `skills/composer-swarm/SKILL.md`. Codex environments must explicitly support and install local skills or

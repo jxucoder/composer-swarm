@@ -44,7 +44,8 @@ composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm cleanup <task-id>
 ```
 
-Use `--background` for long-running tasks:
+Use `--background` for long-running tasks. In repo-only v1 this starts a detached local process and writes
+task state under `.composer-swarm/state/`; it is not a hosted background-agent service or separate task UI.
 
 ```bash
 composer-swarm team "investigate the regression" --builders 2 --background
@@ -86,8 +87,9 @@ Commands:
 /composer:cancel <task-id>
 ```
 
-The command files are thin wrappers. Foreground commands return CLI output directly; background commands use
-Claude Code's background task support and preserve raw `$ARGUMENTS`.
+The command files are thin wrappers. Foreground commands return CLI output directly. When Claude Code
+supports background Bash execution, the command files can use it while preserving raw `$ARGUMENTS`; otherwise
+the runtime's portable background behavior is the detached local process described above.
 
 ## Codex Plugin And Skill
 

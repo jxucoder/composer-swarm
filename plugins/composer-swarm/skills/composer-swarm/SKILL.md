@@ -34,7 +34,7 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    composer-swarm setup --init --trust
    ```
 
-2. For broad, uncertain, or high-impact repo understanding, start your own normal investigation first. Then launch Composer Swarm research in the background and keep researching locally while it runs.
+2. For broad, uncertain, or high-impact repo understanding, start your own normal investigation first. Then launch Composer Swarm research as a detached local run and keep researching locally while it runs.
 
    ```bash
    composer-swarm research "<question>" --workers <1-4> --background
@@ -48,7 +48,7 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
 
    Use `--focus architecture|tests|security|docs|release` when the user asked for a narrower angle. Research output is leads; cross-check important claims yourself before answering or editing.
 
-3. Choose an implementation or review swarm shape from the user's request. Prefer background for broad or multi-step work.
+3. Choose an implementation or review swarm shape from the user's request. Prefer detached local mode for broad or multi-step work.
 
    Recommended defaults:
    - tiny implementation: 1 builder

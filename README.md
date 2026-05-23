@@ -16,7 +16,7 @@ disk.
 - `/composer:team` to hand a coding task to isolated Composer workers for broader search and candidate patches
 - `/composer:research` for read-only repo search while the main agent keeps investigating
 - `/composer:review` for review-only broader search and extra critique
-- `/composer:status` and `/composer:result` to follow background work
+- `/composer:status` and `/composer:result` to follow detached local runs
 - `/composer:verify` to run configured checks against candidates
 - `/composer:apply` to apply exactly one selected candidate patch
 
@@ -65,8 +65,9 @@ One simple first run is:
 /composer:result
 ```
 
-Claude Code will choose whether to wait or run longer work in the background. When a task finishes, Claude
-Code should use the extra Composer search and thinking, inspect the result, verify candidates, review the
+`--background` means Composer Swarm starts a detached local runner and records progress on disk. It is not a
+hosted Cursor Background Agent, hosted Codex task, or separate task UI. When a task finishes, Claude Code or
+Codex should use the extra Composer search and thinking, inspect the result, verify candidates, review the
 actual patch, and ask before applying one.
 
 ## Codex
@@ -102,6 +103,7 @@ workflow calls for them. Without skill support, tell Codex to use the CLI direct
 
 - no npm publish yet
 - no external marketplace submission yet
+- no hosted background task UI; `--background` is a local detached process
 - see [repo-only release notes](docs/repo-only-release.md) for the full list
 
 ## More Detail
