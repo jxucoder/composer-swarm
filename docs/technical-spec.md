@@ -55,7 +55,7 @@ composer-swarm doctor
 composer-swarm agents
 composer-swarm plan <task text> [--roles a,b,c]
 composer-swarm team <task text> [--builders 2] [--background|--wait]
-composer-swarm review [--preset repo|security|tests] [--background|--wait]
+composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
 composer-swarm status [task-id]
 composer-swarm result [task-id] [--verbose]
 composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
@@ -81,7 +81,7 @@ composer-swarm review --preset security
 composer-swarm review --preset tests
 ```
 
-Review tasks run planner and reviewer workers only. They do not create builder patches.
+Review tasks run planner and reviewer workers, plus optional read-only scouts. They do not create builder patches.
 
 ## Results
 

@@ -10,6 +10,7 @@ const DEFAULT_STATE_DIR = ".composer-swarm/state";
 const TASK_SCHEMA = "composer-swarm.task.v1";
 const CANDIDATE_SCHEMA = "composer-swarm.candidate.v1";
 const BUILDER_SUFFIXES = ["a", "b", "c", "d"];
+const SCOUT_SUFFIXES = ["a", "b", "c", "d"];
 export const DEFAULT_CURSOR_MODEL = "composer-2.5-fast";
 
 export const REVIEW_PRESETS = {
@@ -297,6 +298,14 @@ function roleObjective(role, taskText) {
       return `Attempt the smallest direct implementation in an isolated worktree: ${taskText}`;
     case "builder-b":
       return `Attempt an alternate implementation or parallel subtask in an isolated worktree: ${taskText}`;
+    case "scout-a":
+      return `Inspect architecture and runtime flow without editing files: ${taskText}`;
+    case "scout-b":
+      return `Inspect tests, CI, packaging, and docs without editing files: ${taskText}`;
+    case "scout-c":
+      return `Inspect security, process handling, and configuration risks without editing files: ${taskText}`;
+    case "scout-d":
+      return `Inspect usability, maintenance, and edge-case risks without editing files: ${taskText}`;
     case "reviewer":
       return `Review candidate Composer patches for concrete defects, regressions, and missing tests: ${taskText}`;
     case "adversary":
@@ -306,6 +315,9 @@ function roleObjective(role, taskText) {
     default:
       if (role.startsWith("builder-")) {
         return `Attempt an implementation in an isolated worktree: ${taskText}`;
+      }
+      if (role.startsWith("scout-")) {
+        return `Inspect a focused repo area without editing files and report concrete findings: ${taskText}`;
       }
       return taskText;
   }
@@ -519,9 +531,18 @@ export function builderRoles(count = 2) {
   return BUILDER_SUFFIXES.slice(0, bounded).map((suffix) => `builder-${suffix}`);
 }
 
+export function scoutRoles(count = 0) {
+  const numeric = Number.isFinite(Number(count)) ? Number(count) : 0;
+  if (numeric <= 0) {
+    return [];
+  }
+  const bounded = Math.max(0, Math.min(SCOUT_SUFFIXES.length, Math.trunc(numeric)));
+  return SCOUT_SUFFIXES.slice(0, bounded).map((suffix) => `scout-${suffix}`);
+}
+
 function executionRoles(options = {}) {
   if (options.review) {
-    return ["planner", "reviewer"];
+    return ["planner", ...scoutRoles(options.scouts ?? 0), "reviewer"];
   }
   return ["planner", ...builderRoles(options.builders ?? 2), "reviewer"];
 }
@@ -535,8 +556,13 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   const createdAt = new Date().toISOString();
   const requestedBuilders = options.builders ?? 2;
   const builderCount = builderRoles(requestedBuilders).length;
+  const requestedScouts = options.scouts ?? 0;
+  const scoutCount = scoutRoles(requestedScouts).length;
   if (!options.review && builderCount < 1) {
     throw new Error("composer-swarm team requires 1 to 4 builders.");
+  }
+  if (options.review && Number(requestedScouts) !== scoutCount) {
+    throw new Error("composer-swarm review requires 0 to 4 scouts.");
   }
   const model = resolveCursorModel(config, options.model ?? null);
   const roles = executionRoles(options);
@@ -554,6 +580,7 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
     updatedAt: createdAt,
     options: {
       builders: options.review ? 0 : builderCount,
+      scouts: options.review ? scoutCount : 0,
       model,
       background: Boolean(options.background),
       review: Boolean(options.review)
@@ -649,7 +676,7 @@ export function buildCursorAgentArgs({ role, worktree, prompt, model }) {
   if (model) {
     args.push("--model", model);
   }
-  if (role === "planner" || role === "reviewer") {
+  if (role === "planner" || role === "reviewer" || role.startsWith("scout-")) {
     args.push("--mode=plan");
   }
   args.push(prompt);
@@ -659,6 +686,7 @@ export function buildCursorAgentArgs({ role, worktree, prompt, model }) {
 export function buildRolePrompt(role, task, context = {}) {
   const plannerText = context.plannerOutput?.trim() || "No planner output is available yet.";
   const candidateText = context.candidateText?.trim() || "No candidates are available yet.";
+  const scoutText = context.scoutText?.trim() || "No scout notes are available yet.";
   const base = [
     "You are a Composer worker launched by composer-swarm.",
     `Task id: ${task.taskId}`,
@@ -716,8 +744,11 @@ export function buildRolePrompt(role, task, context = {}) {
         "Planner output:",
         plannerText,
         "",
+        "Scout notes:",
+        scoutText,
+        "",
         "Repository review task:",
-        "Use the objective and planner context to review the repository.",
+        "Use the objective, planner context, and scout notes to review the repository.",
         "Do not edit files and do not expect candidate patches.",
         "Prioritize concrete findings with file references, severity, rationale, and suggested fixes.",
         "Call out missing tests or verification gaps separately."
@@ -738,7 +769,37 @@ export function buildRolePrompt(role, task, context = {}) {
     ].join("\n");
   }
 
+  if (role.startsWith("scout-")) {
+    return [
+      ...base,
+      "",
+      "Planner output:",
+      plannerText,
+      "",
+      "Scout task:",
+      "Do not edit files.",
+      scoutFocus(role),
+      "Report concrete findings with file references, evidence, severity, and suggested fixes.",
+      "Prefer useful negative findings over broad summaries."
+    ].join("\n");
+  }
+
   return base.join("\n");
+}
+
+function scoutFocus(role) {
+  switch (role) {
+    case "scout-a":
+      return "Focus on architecture, core runtime flow, task lifecycle, and state transitions.";
+    case "scout-b":
+      return "Focus on tests, CI, packaging, install flow, and documentation accuracy.";
+    case "scout-c":
+      return "Focus on security, process cancellation, environment exposure, and configuration enforcement.";
+    case "scout-d":
+      return "Focus on usability, command ergonomics, maintainability, and edge cases.";
+    default:
+      return "Focus on a distinct repo area that adds useful coverage beyond the planner.";
+  }
 }
 
 function parseJsonLine(line) {
@@ -1051,6 +1112,22 @@ function candidateReviewText(config, workspaceRoot, task) {
     .join("\n\n---\n\n");
 }
 
+function scoutReviewText(task) {
+  const scouts = task.scouts ?? [];
+  if (!scouts.length) {
+    return "";
+  }
+  return scouts
+    .map((scout) =>
+      [
+        `Scout: ${scout.role}`,
+        `Status: ${scout.status}`,
+        `Notes: ${scout.notes || "(no notes)"}`
+      ].join("\n")
+    )
+    .join("\n\n---\n\n");
+}
+
 export async function runTaskWorkflow(config, workspaceRoot, taskId) {
   let task = loadTask(config, workspaceRoot, taskId);
   if (task.status === "cancelled") {
@@ -1065,6 +1142,28 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
     const planner = await runCursorWorker(config, workspaceRoot, task, "planner");
     if (isCancelled(config, workspaceRoot, task.taskId)) {
       return markCancelled(config, workspaceRoot, task);
+    }
+
+    const scoutRoleList = task.workers
+      .map((worker) => worker.role)
+      .filter((role) => role.startsWith("scout-"));
+    if (scoutRoleList.length) {
+      const scouts = await Promise.all(
+        scoutRoleList.map((role) =>
+          runCursorWorker(config, workspaceRoot, task, role, { plannerOutput: planner.finalOutput })
+        )
+      );
+      if (isCancelled(config, workspaceRoot, task.taskId)) {
+        return markCancelled(config, workspaceRoot, task);
+      }
+      task.scouts = scouts.map((scout) => ({
+        role: scout.role,
+        status: scout.status,
+        transcript: scout.transcript,
+        notes: scout.finalOutput || "(scout did not provide notes)",
+        exitCode: scout.exitCode ?? null
+      }));
+      saveTask(config, workspaceRoot, task);
     }
 
     const builderRoleList = task.workers
@@ -1089,7 +1188,8 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
 
     const reviewer = await runCursorWorker(config, workspaceRoot, task, "reviewer", {
       plannerOutput: planner.finalOutput,
-      candidateText: candidateReviewText(config, workspaceRoot, task)
+      candidateText: candidateReviewText(config, workspaceRoot, task),
+      scoutText: scoutReviewText(task)
     });
     task.reviewer = {
       role: "reviewer",
@@ -1138,7 +1238,8 @@ export function createReviewTask(config, workspaceRoot, preset = "repo", options
   return createTeamTask(config, workspaceRoot, reviewObjective(preset), {
     ...options,
     review: true,
-    builders: 0
+    builders: 0,
+    scouts: options.scouts ?? 0
   });
 }
 
@@ -1528,6 +1629,16 @@ export function formatResult(task, options = {}) {
     }
   }
   lines.push("");
+  if (verbose && task.scouts?.length) {
+    lines.push("Scout notes:");
+    for (const scout of task.scouts) {
+      lines.push("");
+      lines.push(`Scout: ${scout.role}`);
+      lines.push(`Status: ${scout.status}`);
+      lines.push(scout.notes ?? "No scout notes recorded.");
+    }
+    lines.push("");
+  }
   lines.push("Reviewer notes:");
   if (verbose) {
     lines.push(task.reviewer?.notes ?? "No reviewer notes recorded yet.");

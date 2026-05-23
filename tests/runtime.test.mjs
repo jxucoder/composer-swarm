@@ -28,6 +28,7 @@ import {
   runDoctor,
   runTaskWorkflow,
   saveTask,
+  scoutRoles,
   verifyCandidate,
   writeDefaultConfig
 } from "../src/runtime.mjs";
@@ -89,14 +90,23 @@ function configWithCursor(command) {
   const config = defaultConfig();
   return {
     ...config,
-    agents: config.agents.map((agent) =>
-      agent.kind === "cursor-cli"
-        ? {
-            ...agent,
-            command
-          }
-        : agent
-    )
+    agents: [
+      ...config.agents.map((agent) =>
+        agent.kind === "cursor-cli"
+          ? {
+              ...agent,
+              command
+            }
+          : agent
+      ),
+      ...scoutRoles(4).map((role) => ({
+        id: `composer-${role}`,
+        kind: "cursor-cli",
+        role,
+        command,
+        canEdit: false
+      }))
+    ]
   };
 }
 
@@ -140,6 +150,9 @@ test("cursor-agent args use stream-json, workspace, model, and plan mode for non
 
   const builderArgs = buildCursorAgentArgs({ role: "builder-a", worktree: "/tmp/w", prompt: "build" });
   assert.equal(builderArgs.includes("--mode=plan"), false);
+
+  const scoutArgs = buildCursorAgentArgs({ role: "scout-a", worktree: "/tmp/w", prompt: "inspect" });
+  assert.equal(scoutArgs.includes("--mode=plan"), true);
 });
 
 test("Composer workers are pinned to Composer 2.5 Fast", () => {
@@ -168,11 +181,17 @@ test("role prompts include objective, role, planner output, and candidate contex
 
   const reviewOnlyPrompt = buildRolePrompt("reviewer", { ...task, options: { review: true } });
   assert.match(reviewOnlyPrompt, /Repository review task/);
+  assert.match(reviewOnlyPrompt, /Scout notes/);
   assert.doesNotMatch(reviewOnlyPrompt, /Candidate patches to review/);
 
   const reviewPlannerPrompt = buildRolePrompt("planner", { ...task, options: { review: true } });
   assert.match(reviewPlannerPrompt, /Review planning task/);
   assert.doesNotMatch(reviewPlannerPrompt, /implementation plan for the builders/);
+
+  const scoutPrompt = buildRolePrompt("scout-a", { ...task, options: { review: true } }, { plannerOutput: "inspect runtime" });
+  assert.match(scoutPrompt, /Scout task/);
+  assert.match(scoutPrompt, /Do not edit files/);
+  assert.match(scoutPrompt, /inspect runtime/);
 });
 
 test("workflow creates worktrees, records transcripts, captures modified and new-file patches", async () => {
@@ -220,6 +239,39 @@ test("workflow creates worktrees, records transcripts, captures modified and new
   assert.doesNotMatch(resultText, /You are a Composer worker/);
   assert.match(renderStatus(config, repo, task.taskId), /Status: completed/);
   assert.match(renderStatus(config, repo, task.taskId), /Next steps:/);
+});
+
+test("review workflow can fan out to read-only scouts", async () => {
+  const repo = makeRepo();
+  const fake = makeFakeCursorAgent(repo);
+  const config = configWithCursor(fake.scriptPath);
+
+  const task = createReviewTask(config, repo, "repo", { scouts: 2, taskId: "task_review_scouts" });
+  await runTaskWorkflow(config, repo, task.taskId);
+
+  const stored = loadTask(config, repo, task.taskId);
+  assert.equal(stored.status, "completed");
+  assert.equal(stored.options.review, true);
+  assert.equal(stored.options.scouts, 2);
+  assert.equal(stored.candidates.length, 0);
+  assert.deepEqual(
+    stored.scouts.map((scout) => scout.role),
+    ["scout-a", "scout-b"]
+  );
+  assert.match(stored.reviewer.notes, /Recommend builder-a/);
+
+  const invocations = fs
+    .readFileSync(fake.logPath, "utf8")
+    .trim()
+    .split(/\n/)
+    .map((line) => JSON.parse(line));
+  assert.equal(invocations.length, 4);
+  assert.equal(invocations.find((entry) => entry.role === "scout-a").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.role === "scout-b").args.includes("--mode=plan"), true);
+
+  const resultText = renderResult(config, repo, task.taskId, { verbose: true });
+  assert.match(resultText, /Scout notes:/);
+  assert.match(resultText, /scout-a done/);
 });
 
 test("applyCandidate applies exactly one stored patch", async () => {
@@ -307,15 +359,18 @@ test("reviewObjective returns preset text and rejects unknown presets", () => {
   assert.throws(() => reviewObjective("unknown"), /Unknown review preset/);
 });
 
-test("createReviewTask uses planner and reviewer only", () => {
+test("createReviewTask can add read-only scout workers", () => {
   const repo = makeRepo();
   const config = defaultConfig();
-  const task = createReviewTask(config, repo, "tests", { taskId: "task_review" });
+  const task = createReviewTask(config, repo, "tests", { taskId: "task_review", scouts: 2 });
   assert.equal(task.options.review, true);
+  assert.equal(task.options.scouts, 2);
   assert.deepEqual(
     task.workers.map((worker) => worker.role),
-    ["planner", "reviewer"]
+    ["planner", "scout-a", "scout-b", "reviewer"]
   );
+  assert.equal(task.workers.find((worker) => worker.role === "scout-a").canEdit, false);
+  assert.throws(() => createReviewTask(config, repo, "tests", { scouts: 5 }), /requires 0 to 4 scouts/);
 });
 
 test("createTeamTask rejects zero builders outside review mode", () => {

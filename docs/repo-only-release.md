@@ -33,6 +33,7 @@ From the target project:
 ```bash
 composer-swarm setup --init --trust
 composer-swarm team "implement the requested change" --builders 2
+composer-swarm review --preset repo --scouts 2 --background
 composer-swarm status <task-id>
 composer-swarm result <task-id>
 composer-swarm verify <task-id>
@@ -85,7 +86,7 @@ and should stay identical to the repo-root skill file.
 The skill tells Codex to:
 
 - run `setup`; use `setup --init --trust` when config is missing
-- launch `team` or `review`
+- choose `team --builders <1-4>` or `review --scouts <0-4>` from the user's request
 - inspect `status` and `result`
 - run `verify` before recommending a candidate when patches exist
 - review patch artifacts before recommending a candidate

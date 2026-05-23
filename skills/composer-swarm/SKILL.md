@@ -31,18 +31,25 @@ Role split: Codex is the main agent. Fast, low-cost Composer workers provide bro
    composer-swarm setup --init --trust
    ```
 
-2. Start a task. Prefer background for broad or multi-step work:
+2. Choose a swarm shape from the user's request. Prefer background for broad or multi-step work.
+
+   Recommended defaults:
+   - tiny implementation: 1 builder
+   - normal implementation: 2 builders
+   - broad or ambiguous implementation: 3-4 builders
+   - quick read-only review: 0-1 scouts
+   - repo/release/security review: 2-4 scouts
 
    ```bash
-   composer-swarm team "<task>" --builders 2 --background
+   composer-swarm team "<task>" --builders <1-4> --background
    ```
 
    For review-only work:
 
    ```bash
-   composer-swarm review --preset repo --background
-   composer-swarm review --preset security --background
-   composer-swarm review --preset tests --background
+   composer-swarm review --preset repo --scouts <0-4> --background
+   composer-swarm review --preset security --scouts <0-4> --background
+   composer-swarm review --preset tests --scouts <0-4> --background
    ```
 
 3. Inspect progress and output:

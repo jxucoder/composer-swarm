@@ -27,7 +27,7 @@ Claude Code should use slash commands that call the runtime:
 ```text
 /composer:setup
 /composer:team [task]
-/composer:review [--preset repo|security|tests]
+/composer:review [--preset repo|security|tests] [--scouts 0..4]
 /composer:status [task-id]
 /composer:result [task-id]
 /composer:verify <task-id>

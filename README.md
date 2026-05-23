@@ -10,7 +10,7 @@ control of judgment and apply.
 ## What You Get
 
 - `/composer:team` to hand a coding task to isolated Composer workers for broader search and candidate patches
-- `/composer:review` for a review-only planner + reviewer pass
+- `/composer:review` for a review-only planner + optional scout + reviewer pass
 - `/composer:status` and `/composer:result` to follow background work
 - `/composer:verify` to run configured checks against candidates
 - `/composer:apply` to apply exactly one selected candidate patch
@@ -76,6 +76,7 @@ Then ask Codex naturally from the project you want to work on:
 
 ```text
 Use Composer Swarm to review this project.
+Use Composer Swarm to review this project with three scouts.
 Use Composer Swarm to fix the failing tests with two builders.
 ```
 

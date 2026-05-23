@@ -23,6 +23,7 @@ import {
   reviewObjective,
   runDoctor,
   runTaskWorkflow,
+  scoutRoles,
   verifyCandidate,
   verifyCandidates,
   workspaceConfigFile,
@@ -41,7 +42,7 @@ Usage:
   composer-swarm agents
   composer-swarm plan <task text> [--roles a,b,c]
   composer-swarm team <task text> [--builders 2] [--background|--wait]
-  composer-swarm review [--preset repo|security|tests] [--background|--wait]
+  composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
   composer-swarm status [task-id]
   composer-swarm result [task-id] [--verbose]
   composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
@@ -190,8 +191,14 @@ function renderSetupReport(report) {
 async function runTeamCommand(config, workspaceRoot, taskText, options) {
   const isReview = Boolean(options.review);
   const builders = isReview ? 0 : options.builders ? Number(options.builders) : 2;
+  const scouts = isReview ? (options.scouts ? Number(options.scouts) : 0) : 0;
   if (!isReview && (!Number.isInteger(builders) || builders < 1 || builders > builderRoles(99).length)) {
     console.error("Invalid --builders value. Use an integer from 1 to 4.");
+    process.exitCode = 2;
+    return null;
+  }
+  if (isReview && (!Number.isInteger(scouts) || scouts < 0 || scouts > scoutRoles(99).length)) {
+    console.error("Invalid --scouts value. Use an integer from 0 to 4.");
     process.exitCode = 2;
     return null;
   }
@@ -202,6 +209,7 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
   }
   const task = createTeamTask(config, workspaceRoot, taskText, {
     builders,
+    scouts,
     model: options.model ?? null,
     background: Boolean(options.background),
     review: isReview
@@ -317,14 +325,15 @@ async function main() {
   }
 
   if (command === "review") {
-    const { options, positionals } = parseArgs(args, ["preset", "model"]);
+    const { options, positionals } = parseArgs(args, ["preset", "model", "scouts"]);
     const preset = options.preset ?? positionals[0] ?? "repo";
     const taskText = reviewObjective(preset);
     const { workspaceRoot, config } = workspaceContext(cwd);
     await runTeamCommand(config, workspaceRoot, taskText, {
       ...options,
       review: true,
-      builders: 0
+      builders: 0,
+      scouts: options.scouts ?? 0
     });
     return;
   }
