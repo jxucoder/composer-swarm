@@ -22,29 +22,41 @@ control of judgment and apply.
 - authenticated `cursor-agent` on `PATH`
 - a clean tracked git checkout before starting an implementation team
 
-## Claude Code
+## Install
 
-Add the marketplace from GitHub:
+Add the marketplace in Claude Code:
 
 ```bash
 /plugin marketplace add jxucoder/composer-swarm
+```
+
+Install the plugin:
+
+```bash
 /plugin install composer@jxucoder-composer-swarm
+```
+
+Reload plugins:
+
+```bash
 /reload-plugins
+```
+
+Then, from the repository you want Composer Swarm to work on, run:
+
+```bash
 /composer:setup
 ```
 
-For local development from a checkout, add the checkout path instead:
+`/composer:setup` will tell you whether Composer Swarm, git, and `cursor-agent` are ready for the current
+repository. If config is missing, it can initialize the repo for trusted Composer worktrees.
 
-```bash
-/plugin marketplace add /path/to/composer-swarm
-```
+After install, you should see the `/composer:*` slash commands listed in Claude Code.
 
-Then run the same install, reload, and setup commands above.
-
-One simple implementation run is:
+One simple first run is:
 
 ```text
-/composer:team fix the failing tests
+/composer:team fix the failing tests --background
 /composer:status
 /composer:result
 ```
@@ -52,13 +64,6 @@ One simple implementation run is:
 Claude Code will choose whether to wait or run longer work in the background. When a task finishes, Claude
 Code should use the extra Composer search and thinking, inspect the result, verify candidates, review the
 actual patch, and ask before applying one.
-
-If Claude Code copies the plugin directory instead of using it in place, either put `composer-swarm` on
-`PATH` or set:
-
-```bash
-export COMPOSER_SWARM_REPO=/path/to/composer-swarm
-```
 
 ## Codex
 
