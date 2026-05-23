@@ -47,6 +47,34 @@
       "canEdit": false
     },
     {
+      "id": "composer-scout-a",
+      "kind": "cursor-cli",
+      "role": "scout-a",
+      "command": "cursor-agent",
+      "canEdit": false
+    },
+    {
+      "id": "composer-scout-b",
+      "kind": "cursor-cli",
+      "role": "scout-b",
+      "command": "cursor-agent",
+      "canEdit": false
+    },
+    {
+      "id": "composer-scout-c",
+      "kind": "cursor-cli",
+      "role": "scout-c",
+      "command": "cursor-agent",
+      "canEdit": false
+    },
+    {
+      "id": "composer-scout-d",
+      "kind": "cursor-cli",
+      "role": "scout-d",
+      "command": "cursor-agent",
+      "canEdit": false
+    },
+    {
       "id": "shell-verifier",
       "kind": "shell",
       "role": "verifier",

@@ -384,6 +384,9 @@ test("writeDefaultConfig --trust adds --trust to cursor-cli agents", () => {
   const config = JSON.parse(fs.readFileSync(filePath, "utf8"));
   const cursorAgents = config.agents.filter((agent) => agent.kind === "cursor-cli");
   assert.ok(cursorAgents.length > 0);
+  for (const role of ["planner", "builder-a", "builder-b", "reviewer", "scout-a", "scout-b", "scout-c", "scout-d"]) {
+    assert.ok(cursorAgents.find((agent) => agent.role === role), `${role} should be configured`);
+  }
   for (const agent of cursorAgents) {
     assert.deepEqual(agent.args, ["--trust"]);
   }

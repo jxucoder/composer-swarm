@@ -33,40 +33,80 @@
       "kind": "cursor-cli",
       "role": "planner",
       "command": "cursor-agent",
+      "canEdit": false,
       "args": [
         "--trust"
-      ],
-      "canEdit": false
+      ]
     },
     {
       "id": "composer-builder-a",
       "kind": "cursor-cli",
       "role": "builder-a",
       "command": "cursor-agent",
+      "canEdit": true,
       "args": [
         "--trust"
-      ],
-      "canEdit": true
+      ]
     },
     {
       "id": "composer-builder-b",
       "kind": "cursor-cli",
       "role": "builder-b",
       "command": "cursor-agent",
+      "canEdit": true,
       "args": [
         "--trust"
-      ],
-      "canEdit": true
+      ]
     },
     {
       "id": "composer-reviewer",
       "kind": "cursor-cli",
       "role": "reviewer",
       "command": "cursor-agent",
+      "canEdit": false,
       "args": [
         "--trust"
-      ],
-      "canEdit": false
+      ]
+    },
+    {
+      "id": "composer-scout-a",
+      "kind": "cursor-cli",
+      "role": "scout-a",
+      "command": "cursor-agent",
+      "canEdit": false,
+      "args": [
+        "--trust"
+      ]
+    },
+    {
+      "id": "composer-scout-b",
+      "kind": "cursor-cli",
+      "role": "scout-b",
+      "command": "cursor-agent",
+      "canEdit": false,
+      "args": [
+        "--trust"
+      ]
+    },
+    {
+      "id": "composer-scout-c",
+      "kind": "cursor-cli",
+      "role": "scout-c",
+      "command": "cursor-agent",
+      "canEdit": false,
+      "args": [
+        "--trust"
+      ]
+    },
+    {
+      "id": "composer-scout-d",
+      "kind": "cursor-cli",
+      "role": "scout-d",
+      "command": "cursor-agent",
+      "canEdit": false,
+      "args": [
+        "--trust"
+      ]
     },
     {
       "id": "shell-verifier",

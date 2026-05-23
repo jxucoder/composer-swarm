@@ -85,6 +85,13 @@ export function defaultConfig() {
         command: "cursor-agent",
         canEdit: false
       },
+      ...SCOUT_SUFFIXES.map((suffix) => ({
+        id: `composer-scout-${suffix}`,
+        kind: "cursor-cli",
+        role: `scout-${suffix}`,
+        command: "cursor-agent",
+        canEdit: false
+      })),
       {
         id: "shell-verifier",
         kind: "shell",
