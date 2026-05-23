@@ -31,7 +31,9 @@ Composer workers are launched through `cursor-agent` with:
 --print --output-format stream-json --workspace <worktree> --model composer-2.5-fast
 ```
 
-`composer-2.5-fast` is pinned. Other `--model` values are rejected.
+`composer-2.5-fast` is pinned. Other `--model` values are rejected. The worker model assumes Composer is
+fast and low-cost enough to spend on wider code search, additional reasoning, review-only passes, and
+alternate implementation attempts while the host agent owns final judgment.
 
 Default roles:
 

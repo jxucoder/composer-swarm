@@ -1,7 +1,7 @@
 {
   "name": "composer-swarm",
   "version": "0.1.0",
-  "description": "Delegate repository work from Codex to local Composer worker teams.",
+  "description": "Add fast, low-cost Composer worker teams to Codex.",
   "author": {
     "name": "jxucoder"
   },
@@ -12,8 +12,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Composer Swarm",
-    "shortDescription": "Run local Composer worker teams from Codex.",
-    "longDescription": "Composer Swarm lets Codex delegate repository work to isolated local Cursor/Composer workers, compare candidate patches, verify results, and apply only after explicit approval.",
+    "shortDescription": "Run fast local Composer teams from Codex.",
+    "longDescription": "Composer Swarm lets Codex use fast local Cursor/Composer workers for broader code search, extra reasoning, candidate patches, verification, and explicit-approval apply.",
     "developerName": "jxucoder",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],

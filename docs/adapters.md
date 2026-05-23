@@ -1,7 +1,7 @@
 # Host And Agent Adapters
 
 Composer Swarm is host-first: Claude Code or Codex is the user's cockpit, while Cursor/Composer workers
-do most of the parallel execution.
+provide fast parallel search, extra reasoning, review passes, and candidate execution.
 
 ## Adapter Model
 

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Delegate repository work from Claude Code or Codex to local Composer worker teams.",
+  "description": "Add fast, low-cost Composer worker teams to Claude Code or Codex.",
   "bin": {
     "composer-swarm": "./bin/composer-swarm.mjs"
   },

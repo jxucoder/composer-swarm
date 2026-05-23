@@ -18,7 +18,8 @@ operator surfaces. Cursor/Composer workers are the team.
 
 The X/Grok thread points to three useful facts:
 
-- Developers like the planner/executor split: Claude or Codex can supervise while Composer writes quickly.
+- Developers like the main-agent/worker split: Claude or Codex can supervise while fast Composer workers
+  search, think, review, and draft candidate patches in parallel.
 - Claude Code Agent Teams are not a native way to add non-Claude teammates, so we should not depend on
   that path for distribution.
 - The successful adoption pattern is host-native commands, like `codex-plugin-cc` and `cursor-plugin-cc`,

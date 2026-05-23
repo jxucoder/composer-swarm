@@ -12,14 +12,15 @@ Your current agent + a team of Composer workers
 ```
 
 Claude Code and Codex users already have a cockpit. The layer should make that cockpit better by giving it
-Composer capacity: multiple fast workers, isolated attempts, patch summaries, and a clean merge path.
+Composer capacity: multiple fast, low-cost workers for wider code search, additional thinking, isolated
+attempts, patch summaries, and a clean merge path.
 
 ## Insight From The Grok Share
 
 The shared Grok conversation highlights a current pattern on X:
 
-- users want Claude/Codex to plan, supervise, or review
-- users want Composer 2.5/Cursor to execute quickly
+- users want Claude/Codex to remain the main agent that plans, supervises, and reviews
+- users want Composer 2.5/Cursor to search, think, review, and execute quickly
 - official Claude Agent Teams do not make Codex or Composer native teammates
 - plugin-style delegation is the proven adoption path
 

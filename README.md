@@ -1,14 +1,15 @@
 # Composer Swarm
 
-> **Claude or Codex plans. Composer writes candidates. Your agent reviews and applies.**
+> **Claude or Codex stays in charge. Fast Composer workers search, think, and draft options.**
 
 Composer Swarm lets Claude Code or Codex delegate repository work to local Cursor/Composer workers without
-making the human drive a second CLI. The coding agent runs the swarm from your project, compares candidate
-patches, verifies them, and asks before applying exactly one.
+making the human drive a second CLI. Composer is fast and low-cost enough to run parallel passes for wider
+code search, extra reasoning, alternate implementations, and review-only checks while the main agent keeps
+control of judgment and apply.
 
 ## What You Get
 
-- `/composer:team` to hand a coding task to isolated Composer workers
+- `/composer:team` to hand a coding task to isolated Composer workers for broader search and candidate patches
 - `/composer:review` for a review-only planner + reviewer pass
 - `/composer:status` and `/composer:result` to follow background work
 - `/composer:verify` to run configured checks against candidates
@@ -49,7 +50,8 @@ One simple implementation run is:
 ```
 
 Claude Code will choose whether to wait or run longer work in the background. When a task finishes, Claude
-Code should inspect the result, verify candidates, review the actual patch, and ask before applying one.
+Code should use the extra Composer search and thinking, inspect the result, verify candidates, review the
+actual patch, and ask before applying one.
 
 If Claude Code copies the plugin directory instead of using it in place, either put `composer-swarm` on
 `PATH` or set:

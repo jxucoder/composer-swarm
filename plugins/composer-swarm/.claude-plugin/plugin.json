@@ -1,7 +1,7 @@
 {
   "name": "composer",
   "version": "0.1.0",
-  "description": "Delegate repository work from Claude Code to local Composer worker teams.",
+  "description": "Add fast, low-cost Composer worker teams to Claude Code.",
   "author": {
     "name": "jxucoder"
   },

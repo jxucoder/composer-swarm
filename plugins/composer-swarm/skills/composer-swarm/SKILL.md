@@ -7,7 +7,7 @@ description: Delegate repo tasks to local Composer/Cursor worker teams, compare 
 
 Use this skill when the user asks Codex to delegate implementation or review work to Composer/Cursor workers, compare swarm candidates, verify candidates, or apply a selected patch.
 
-Role split: Codex plans and reviews. Composer writes isolated candidates. Codex verifies, compares, and applies only after explicit approval.
+Role split: Codex is the main agent. Fast, low-cost Composer workers provide broader code search, extra reasoning, isolated candidate patches, and review-only checks. Codex verifies, compares, and applies only after explicit approval.
 
 ## Runtime
 
@@ -15,7 +15,7 @@ Role split: Codex plans and reviews. Composer writes isolated candidates. Codex 
 - Otherwise run `node <composer-swarm-repo>/bin/composer-swarm.mjs ...`.
 - Run commands from the target repository.
 - Composer workers must use Cursor model `composer-2.5-fast` only.
-- Composer workers edit isolated git worktrees; the Codex host supervises and chooses.
+- Composer workers edit isolated git worktrees; the Codex host supervises, compares, and chooses.
 
 ## Default Flow
 

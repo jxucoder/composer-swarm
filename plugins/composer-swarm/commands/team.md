@@ -1,5 +1,5 @@
 ---
-description: Delegate a repository task to local Composer worker candidates
+description: Delegate a repository task to fast Composer workers for broader search and candidate patches
 argument-hint: '<task> [--builders 2] [--background|--wait]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
