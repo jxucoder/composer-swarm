@@ -23,6 +23,42 @@ Runtime state:
 
 Commit `.composer-swarm/config.json` when the team configuration is useful. Ignore `.composer-swarm/state/`.
 
+## Config Schema
+
+The runtime reads `.composer-swarm/config.json` in the target git workspace. See
+[swarm.config.example.json](../swarm.config.example.json) for a full example, or print the default with:
+
+```bash
+composer-swarm example-config
+```
+
+Top-level fields:
+
+| Field | Purpose |
+|---|---|
+| `version` | Config format version |
+| `swarm` | Swarm name, state directory, default roles |
+| `distribution` | Host and worker defaults |
+| `agents` | Worker definitions used by `doctor`, `team`, and `review` |
+
+**Enforced at runtime:**
+
+- `distribution.defaultWorkerModel` must be `composer-2.5-fast`. Other values fail `doctor` and are rejected
+  when launching workers.
+- Cursor worker agents must resolve to an available `cursor-agent` command.
+- `verify` requires a shell `verifier` agent when that command is run. The default config includes one.
+
+**Informational only:**
+
+- `distribution.userPromise`, `primaryHosts`, and `defaultWorkerKind` are shown in `doctor` output but are
+  not otherwise enforced.
+- `swarm.defaultRoles` documents the default team shape; task commands choose roles directly.
+
+**Ignored if present:**
+
+- `policies` is stripped during `loadConfig` and has no effect in v1. Do not rely on policy fields for
+  enforcement.
+
 ## Worker Model
 
 Composer workers are launched through `cursor-agent` with:
@@ -68,8 +104,8 @@ composer-swarm cleanup [task-id]
 `team` waits by default. `--background` starts a detached local runner and stores task state so `status` and
 `result` can inspect it later.
 
-`setup` checks git, config, Node, `cursor-agent`, and verifier readiness. `setup --init --trust` writes
-`.composer-swarm/config.json` with trusted Cursor worker args.
+`setup` checks git, config, Node, configured Cursor agents, and configured shell verifier commands. `setup
+--init --trust` writes `.composer-swarm/config.json` with trusted Cursor worker args.
 
 ## Reviews
 
@@ -153,14 +189,22 @@ export COMPOSER_SWARM_REPO=/path/to/composer-swarm
 
 ## Packaging
 
+The package is MIT-licensed and requires Node `>=20.0.0` (`package.json` `engines.node`).
+
 Release packaging excludes local generated state, tarballs, `node_modules/`, and local reference checkouts
 through `.gitignore` and `.npmignore`.
 
-GitHub CI runs syntax checks, `npm test`, and CLI smoke checks on Node 20 and Node 22.
+GitHub CI runs on Node 20 and Node 22:
+
+1. **Syntax check** — `node --check` on `bin/composer-swarm.mjs`, `src/runtime.mjs`, `src/args.mjs`, and
+   packaged plugin scripts under `plugins/composer-swarm/scripts/`.
+2. **Tests** — `npm test` (`node --test tests/*.test.mjs`).
+3. **CLI smoke** — `node bin/composer-swarm.mjs --help` and `node bin/composer-swarm.mjs example-config`.
+4. **Package smoke** — `npm pack --dry-run --json`.
 
 ## Known Limits
 
-- no npm package yet
+- no npm publish yet
 - no external marketplace submission yet
 - no MCP server in v1
 - no auto-merge; apply requires explicit user action

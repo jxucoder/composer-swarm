@@ -110,6 +110,42 @@ console.log(JSON.stringify({ type: "final", text: role + " done" }));
   return { scriptPath };
 }
 
+function makeRetryingCursorAgent() {
+  const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-retry-"));
+  const scriptPath = path.join(fakeDir, "fake-retrying-cursor-agent.mjs");
+  const markerPath = path.join(fakeDir, "builder-b-failed-once");
+  fs.writeFileSync(
+    scriptPath,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+const workspace = args[args.indexOf("--workspace") + 1];
+const prompt = args[args.length - 1];
+const role = /Role: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
+
+if (role === "builder-b" && !fs.existsSync(${JSON.stringify(markerPath)})) {
+  fs.writeFileSync(${JSON.stringify(markerPath)}, "failed once\\n", "utf8");
+  console.error("Error: ENOENT: no such file or directory, rename '/Users/test/.cursor/cli-config.json.tmp' -> '/Users/test/.cursor/cli-config.json'");
+  process.exit(1);
+}
+
+if (role === "builder-a") {
+  fs.writeFileSync(path.join(workspace, "src", "app.txt"), "builder-a\\n", "utf8");
+}
+if (role === "builder-b") {
+  fs.writeFileSync(path.join(workspace, "src", "retry.txt"), "builder-b retry\\n", "utf8");
+}
+
+console.log(JSON.stringify({ type: "final", text: role === "reviewer" ? "Recommend builder-b." : role + " done" }));
+`,
+    "utf8"
+  );
+  fs.chmodSync(scriptPath, 0o755);
+  return { scriptPath };
+}
+
 function configWithCursor(command) {
   const config = defaultConfig();
   return {
@@ -269,6 +305,27 @@ test("workflow does not overwrite a cancellation after reviewer finishes", async
   const stored = loadTask(config, repo, task.taskId);
   assert.equal(stored.status, "cancelled");
   assert.equal(stored.reviewer.status, "cancelled");
+});
+
+test("workflow retries the transient Cursor config rename race", async () => {
+  const repo = makeRepo();
+  const fake = makeRetryingCursorAgent();
+  const config = configWithCursor(fake.scriptPath);
+  const task = createTeamTask(config, repo, "retry cursor config race", {
+    builders: 2,
+    taskId: "task_retry_cursor_config"
+  });
+
+  await runTaskWorkflow(config, repo, task.taskId);
+
+  const stored = loadTask(config, repo, task.taskId);
+  const builderB = stored.workers.find((worker) => worker.role === "builder-b");
+  const candidateB = stored.candidates.find((candidate) => candidate.role === "builder-b");
+  assert.equal(stored.status, "completed");
+  assert.equal(builderB.status, "completed");
+  assert.ok(candidateB.patchFile);
+  assert.match(fs.readFileSync(candidateB.patchFile, "utf8"), /builder-b retry/);
+  assert.match(fs.readFileSync(builderB.transcript, "utf8"), /cursor-cli-config-race/);
 });
 
 test("review workflow can fan out to read-only scouts", async () => {

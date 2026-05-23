@@ -2,6 +2,8 @@
 
 This v1 release is intentionally repo-only. Do not publish to npm or submit to external marketplaces yet.
 
+Licensed under [MIT](../LICENSE). Requires Node `>=20.0.0` (`package.json` `engines.node`).
+
 ## Install
 
 Clone the repo and call the CLI with Node:
@@ -51,11 +53,20 @@ composer-swarm result <task-id>
 
 ## Claude Code Local Plugin
 
-The repo includes local plugin files under `plugins/composer-swarm` and a local marketplace file under
-`.claude-plugin/marketplace.json`.
+The repo includes local plugin files under `plugins/composer-swarm` and a repo-local marketplace file under
+[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json). The plugin name is `composer`; the
+marketplace id is `jxucoder-composer-swarm`.
 
-For local testing, install the plugin from this checkout using Claude Code's local plugin flow. If your local
-plugin install copies the plugin directory instead of using it in place, set:
+From a Claude Code session, add the local marketplace with the absolute path to this checkout, install the
+plugin, and reload:
+
+```bash
+/plugin marketplace add /path/to/composer-swarm/.claude-plugin/marketplace.json
+/plugin install composer@jxucoder-composer-swarm
+/reload-plugins
+```
+
+If your local plugin install copies the plugin directory instead of using it in place, set:
 
 ```bash
 export COMPOSER_SWARM_REPO=/path/to/composer-swarm
@@ -79,9 +90,10 @@ Claude Code's background task support and preserve raw `$ARGUMENTS`.
 ## Codex Plugin And Skill
 
 If your Codex environment supports local skills or plugins, install the repo-local Codex plugin from
-`.agents/plugins/marketplace.json`, or copy `skills/composer-swarm/SKILL.md` into the skills directory your
-Codex setup uses. The plugin-packaged copy lives at `plugins/composer-swarm/skills/composer-swarm/SKILL.md`
-and should stay identical to the repo-root skill file.
+[`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json), or copy
+[`skills/composer-swarm/SKILL.md`](../skills/composer-swarm/SKILL.md) into the skills directory your Codex
+setup uses. The plugin-packaged copy lives at `plugins/composer-swarm/skills/composer-swarm/SKILL.md` and
+should stay identical to the repo-root skill file.
 
 The skill tells Codex to:
 
@@ -91,6 +103,16 @@ The skill tells Codex to:
 - run `verify` before recommending a candidate when patches exist
 - review patch artifacts before recommending a candidate
 - ask the user before running `apply`
+
+## Config Notes
+
+Runtime config lives at `.composer-swarm/config.json` in the target project. See
+[swarm.config.example.json](../swarm.config.example.json) or run `composer-swarm example-config`.
+
+- `distribution.defaultWorkerModel` must stay `composer-2.5-fast`.
+- `verify` requires a shell `verifier` agent. The default config includes one.
+- A top-level `policies` field is ignored if present; it is stripped during config load and has no effect in
+  v1.
 
 ## State Layout
 
@@ -111,9 +133,18 @@ Commit `.composer-swarm/config.json` if the team configuration is useful to the 
 
 ## Manual Release Checks
 
+Match CI before tagging a release:
+
 ```bash
-node --test tests/*.test.mjs
-node bin/composer-swarm.mjs setup
+node --check bin/composer-swarm.mjs
+node --check src/runtime.mjs
+node --check src/args.mjs
+node --check plugins/composer-swarm/scripts/composer-swarm.mjs
+node --check plugins/composer-swarm/scripts/lib/args.mjs
+npm test
+node bin/composer-swarm.mjs --help
+node bin/composer-swarm.mjs example-config >/dev/null
+npm pack --dry-run --json
 ```
 
 Then, in a disposable git repository with authenticated `cursor-agent`:
@@ -126,9 +157,10 @@ node /path/to/composer-swarm/bin/composer-swarm.mjs result <task-id>
 
 ## Known Limits
 
-- no npm package
-- no marketplace submission
+- no npm publish
+- no external marketplace submission
 - no MCP server
 - no auto-ranking
 - no auto-merge
 - no worker backend other than `cursor-agent`
+- config `policies` fields are not enforced

@@ -125,19 +125,10 @@ Repo-local state is useful for collaboration, but runtime metadata should be eas
 .composer-swarm/
   config.json
   state/
-    swarm.json
-    tasks/
-      task-*.json
-    transcripts/
-      task-*/
-        planner.jsonl
-        builder-a.jsonl
-    artifacts/
-      task-*/
-        task-*-builder-a.patch
-    worktrees/
-      task-*/
-        builder-a/
+    tasks/<task-id>.json
+    transcripts/<task-id>/<role>.jsonl
+    artifacts/<task-id>/<candidate-id>.patch
+    worktrees/<task-id>/<role>/
 ```
 
 Recommended `.gitignore`:
@@ -146,7 +137,7 @@ Recommended `.gitignore`:
 .composer-swarm/state/
 ```
 
-Config can be committed; state usually should not be.
+Commit `.composer-swarm/config.json` when the team configuration is useful. Ignore `.composer-swarm/state/`.
 
 ## Task Lifecycle
 

@@ -113,16 +113,27 @@ Composer can review candidates, but the host should make the final recommendatio
 
 ## Distribution Plan
 
+### v1: Repo-Local First
+
+Ship v1 as a repo-only release. Users clone this repository and install the local Claude plugin from
+[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json) or the Codex plugin from
+[`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json). Do not depend on npm publish or
+external marketplace submission yet.
+
 ### Claude Code First
 
-Follow the pattern that made `codex-plugin-cc` and `cursor-plugin-cc` easy to adopt:
+Follow the pattern that made `codex-plugin-cc` and `cursor-plugin-cc` easy to adopt, but start with the
+repo-local marketplace in v1:
 
 ```text
-/plugin marketplace add <publisher>/composer-swarm
-/plugin install composer-swarm@<publisher>
+/plugin marketplace add /path/to/composer-swarm/.claude-plugin/marketplace.json
+/plugin install composer@jxucoder-composer-swarm
 /composer:setup
 /composer:team ...
 ```
+
+External marketplace install (`/plugin marketplace add <publisher>/composer-swarm`) is deferred until after
+the repo-only CLI and local plugin flow are stable.
 
 The Claude plugin should be thin. It calls the CLI and returns stdout.
 

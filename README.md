@@ -24,21 +24,14 @@ control of judgment and apply.
 
 ## Install
 
-Add the marketplace in Claude Code:
+Composer Swarm v1 is repo-only. Clone this repository and install the local plugin or skill from this
+checkout. See [repo-only release notes](docs/repo-only-release.md) for full install and release-check steps.
+
+**Claude Code** — from this checkout, add the repo-local marketplace and install the `composer` plugin:
 
 ```bash
-/plugin marketplace add jxucoder/composer-swarm
-```
-
-Install the plugin:
-
-```bash
+/plugin marketplace add /path/to/composer-swarm/.claude-plugin/marketplace.json
 /plugin install composer@jxucoder-composer-swarm
-```
-
-Reload plugins:
-
-```bash
 /reload-plugins
 ```
 
@@ -48,10 +41,15 @@ Then, from the repository you want Composer Swarm to work on, run:
 /composer:setup
 ```
 
-`/composer:setup` will tell you whether Composer Swarm, git, and `cursor-agent` are ready for the current
-repository. If config is missing, it can initialize the repo for trusted Composer worktrees.
+**Codex** — install the repo-local plugin from
+[.agents/plugins/marketplace.json](.agents/plugins/marketplace.json), or copy
+[skills/composer-swarm/SKILL.md](skills/composer-swarm/SKILL.md) into your Codex skills directory.
 
-After install, you should see the `/composer:*` slash commands listed in Claude Code.
+**CLI only** — call the CLI directly from your target project:
+
+```bash
+node /path/to/composer-swarm/bin/composer-swarm.mjs setup
+```
 
 One simple first run is:
 
@@ -92,6 +90,12 @@ workflow calls for them. Without skill support, tell Codex to use the CLI direct
 - apply is manual and requires an explicit selected candidate
 - `--recommended` should only be used after inspecting the result
 
+## Current Limitations
+
+- no npm publish yet
+- no external marketplace submission yet
+- see [repo-only release notes](docs/repo-only-release.md) for the full list
+
 ## More Detail
 
 - [Technical spec](docs/technical-spec.md)
@@ -102,4 +106,4 @@ workflow calls for them. Without skill support, tell Codex to use the CLI direct
 
 ## License
 
-MIT
+[MIT](LICENSE)

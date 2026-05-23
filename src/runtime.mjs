@@ -11,6 +11,7 @@ const TASK_SCHEMA = "composer-swarm.task.v1";
 const CANDIDATE_SCHEMA = "composer-swarm.candidate.v1";
 const BUILDER_SUFFIXES = ["a", "b", "c", "d"];
 const SCOUT_SUFFIXES = ["a", "b", "c", "d"];
+const CURSOR_CONFIG_RACE_RETRY_DELAY_MS = 750;
 export const DEFAULT_CURSOR_MODEL = "composer-2.5-fast";
 
 export const REVIEW_PRESETS = {
@@ -914,6 +915,8 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
     const outputParts = [];
     let child;
     let settled = false;
+    let attempts = 0;
+    let retryScheduled = false;
 
     function recordLine(stream, line) {
       if (!line) {
@@ -934,11 +937,14 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
       });
     }
 
-    function finish(status, detail = {}) {
-      if (settled) {
-        return;
+    function canRetryStartup(status) {
+      if (status !== "failed" || attempts > 1) {
+        return false;
       }
-      settled = true;
+      return /ENOENT:.*cli-config\.json\.tmp.*cli-config\.json/.test(outputParts.join("\n"));
+    }
+
+    function flushBufferedLines() {
       for (const [stream, state] of [
         ["stdout", stdoutState],
         ["stderr", stderrState]
@@ -948,6 +954,35 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
           recordLine(stream, line);
         }
       }
+    }
+
+    function finish(status, detail = {}) {
+      if (settled) {
+        return;
+      }
+      flushBufferedLines();
+      if (retryScheduled) {
+        return;
+      }
+      if (canRetryStartup(status)) {
+        retryScheduled = true;
+        outputParts.length = 0;
+        delete worker.pid;
+        appendTranscript(transcript, {
+          type: "retry",
+          taskId: task.taskId,
+          role,
+          reason: "cursor-cli-config-race",
+          nextAttempt: attempts + 1
+        });
+        saveTask(config, workspaceRoot, task);
+        setTimeout(() => {
+          retryScheduled = false;
+          startAttempt();
+        }, CURSOR_CONFIG_RACE_RETRY_DELAY_MS);
+        return;
+      }
+      settled = true;
       const finalOutput = cleanWorkerOutput(outputParts.join("\n"), prompt);
       const current = safeLoadTask(config, workspaceRoot, task.taskId);
       const cancelled = current?.status === "cancelled";
@@ -975,36 +1010,41 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
       resolve(worker);
     }
 
-    try {
-      child = spawn(agent.command, args, {
-        cwd: worktree,
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"]
+    function startAttempt() {
+      attempts += 1;
+      try {
+        child = spawn(agent.command, args, {
+          cwd: worktree,
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"]
+        });
+      } catch (error) {
+        finish("failed", { error: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+
+      worker.pid = child.pid;
+      saveTask(config, workspaceRoot, task);
+
+      child.stdout.on("data", (chunk) => {
+        for (const line of splitLines(stdoutState, chunk.toString("utf8"))) {
+          recordLine("stdout", line);
+        }
       });
-    } catch (error) {
-      finish("failed", { error: error instanceof Error ? error.message : String(error) });
-      return;
+      child.stderr.on("data", (chunk) => {
+        for (const line of splitLines(stderrState, chunk.toString("utf8"))) {
+          recordLine("stderr", line);
+        }
+      });
+      child.on("error", (error) => {
+        finish("failed", { error: error instanceof Error ? error.message : String(error) });
+      });
+      child.on("close", (exitCode, signal) => {
+        finish(exitCode === 0 ? "completed" : "failed", { exitCode, signal });
+      });
     }
 
-    worker.pid = child.pid;
-    saveTask(config, workspaceRoot, task);
-
-    child.stdout.on("data", (chunk) => {
-      for (const line of splitLines(stdoutState, chunk.toString("utf8"))) {
-        recordLine("stdout", line);
-      }
-    });
-    child.stderr.on("data", (chunk) => {
-      for (const line of splitLines(stderrState, chunk.toString("utf8"))) {
-        recordLine("stderr", line);
-      }
-    });
-    child.on("error", (error) => {
-      finish("failed", { error: error instanceof Error ? error.message : String(error) });
-    });
-    child.on("close", (exitCode, signal) => {
-      finish(exitCode === 0 ? "completed" : "failed", { exitCode, signal });
-    });
+    startAttempt();
   });
 }
 
