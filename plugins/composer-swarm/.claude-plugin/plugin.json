@@ -1,6 +1,6 @@
 {
   "name": "composer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Add fast, low-cost Composer research and worker teams to Claude Code.",
   "author": {
     "name": "jxucoder"
