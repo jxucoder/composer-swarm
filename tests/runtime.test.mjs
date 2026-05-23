@@ -18,6 +18,7 @@ import {
   findNestedGitRepos,
   formatCandidateComparison,
   formatPlan,
+  loadConfig,
   loadTask,
   planTask,
   renderResult,
@@ -150,41 +151,89 @@ function configWithCursor(command) {
   const config = defaultConfig();
   return {
     ...config,
-    agents: config.agents.map((agent) =>
-      agent.kind === "cursor-cli"
-        ? {
-            ...agent,
-            command
-          }
-        : agent
-    )
+    workers: {
+      ...config.workers,
+      composer: {
+        ...config.workers.composer,
+        command
+      }
+    }
   };
 }
 
-test("plans default roles using configured agents", () => {
+test("plans default worker phases without user-configured roles", () => {
   const plan = planTask(defaultConfig(), "ship the feature");
-  assert.equal(plan.roles.length, 5);
-  assert.equal(plan.roles[0].role, "planner");
-  assert.equal(plan.roles[1].agentId, "composer-builder-a");
-  assert.equal(plan.roles[2].agentId, "composer-builder-b");
-  assert.equal(plan.roles[3].agentId, "composer-reviewer");
+  assert.equal(plan.workers.length, 4);
+  assert.equal(plan.workers[0].phase, "planner");
+  assert.equal(plan.workers[1].phase, "builder-a");
+  assert.equal(plan.workers[2].phase, "builder-b");
+  assert.equal(plan.workers[3].phase, "reviewer");
+  assert.equal("agentId" in plan.workers[1], false);
 });
 
-test("formats plan with objective and role mappings", () => {
-  const text = formatPlan(planTask(defaultConfig(), "fix tests", { roles: ["builder-a", "reviewer"] }));
+test("formats plan with objective and worker phases", () => {
+  const text = formatPlan(planTask(defaultConfig(), "fix tests", { builders: 1 }));
   assert.match(text, /Objective: fix tests/);
-  assert.match(text, /builder-a: composer-builder-a/);
-  assert.match(text, /reviewer: composer-reviewer/);
+  assert.match(text, /Execution plan:/);
+  assert.match(text, /implementation pass A \(can edit\)/);
+  assert.match(text, /review pass \(read-only\)/);
+  assert.doesNotMatch(text, /composer-builder-a/);
 });
 
-test("doctor reports host-driven agents without failing", () => {
-  const config = {
-    ...defaultConfig(),
-    agents: [{ id: "claude", kind: "claude-code", role: "architect", canEdit: false }]
-  };
+test("doctor reports configured workers", () => {
+  const config = defaultConfig();
+  config.workers.composer.command = process.execPath;
   const report = runDoctor(config);
   assert.equal(report.ok, true);
-  assert.match(report.lines.join("\n"), /host-driven/);
+  assert.match(report.lines.join("\n"), /Workers:/);
+  assert.match(report.lines.join("\n"), /composer: ok/);
+  assert.match(report.lines.join("\n"), /verifier: ok/);
+});
+
+test("legacy agent configs still load without exposing default roles", () => {
+  const repo = makeRepo();
+  fs.mkdirSync(path.join(repo, ".composer-swarm"));
+  fs.writeFileSync(
+    path.join(repo, ".composer-swarm", "config.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        swarm: {
+          name: "legacy",
+          stateDir: ".composer-swarm/state",
+          defaultRoles: ["planner", "builder-a", "reviewer"]
+        },
+        agents: [
+          {
+            id: "legacy-builder",
+            kind: "cursor-cli",
+            role: "builder-a",
+            command: process.execPath,
+            args: ["--trust"],
+            canEdit: true
+          },
+          {
+            id: "legacy-verifier",
+            kind: "shell",
+            role: "verifier",
+            command: "bash",
+            args: ["-lc", "true"]
+          }
+        ]
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  const config = loadConfig(repo);
+  assert.equal("defaultRoles" in config.swarm, false);
+  const report = runDoctor(config);
+  assert.equal(report.ok, true);
+  assert.match(report.lines.join("\n"), /composer: ok/);
+  const task = createTeamTask(config, repo, "legacy config task", { builders: 1, taskId: "task_legacy" });
+  assert.equal(task.workers.find((worker) => worker.role === "builder-a").agentId, "legacy-builder");
 });
 
 test("cursor-agent args use stream-json, workspace, model, and plan mode for non-editing roles", () => {
@@ -209,6 +258,8 @@ test("cursor-agent args use stream-json, workspace, model, and plan mode for non
 test("Composer workers are pinned to Composer 2.5 Fast", () => {
   const config = defaultConfig();
   assert.equal(config.distribution.defaultWorkerModel, DEFAULT_CURSOR_MODEL);
+  assert.equal("agents" in config, false);
+  assert.equal("defaultRoles" in config.swarm, false);
   assert.equal("policies" in config, false);
   assert.equal(resolveCursorModel(config), DEFAULT_CURSOR_MODEL);
   assert.equal(resolveCursorModel(config, DEFAULT_CURSOR_MODEL), DEFAULT_CURSOR_MODEL);
@@ -419,9 +470,7 @@ test("cleanup removes worktrees and process metadata", async () => {
   const repo = makeRepo();
   const fake = makeFakeCursorAgent(repo);
   const config = configWithCursor(fake.scriptPath);
-  config.agents = config.agents.map((agent) =>
-    agent.role === "verifier" ? { ...agent, command: "bash", args: ["-lc", "true"], kind: "shell" } : agent
-  );
+  config.workers.verifier = { kind: "shell", command: "bash", args: ["-lc", "true"] };
   const task = createTeamTask(config, repo, "change the app", { builders: 1, taskId: "task_cleanup" });
   await runTaskWorkflow(config, repo, task.taskId);
   verifyCandidate(config, repo, task.taskId, "builder-a");
@@ -465,18 +514,13 @@ test("createTeamTask rejects zero builders outside review mode", () => {
   assert.throws(() => createTeamTask(defaultConfig(), repo, "no builders", { builders: 0 }), /requires 1 to 4 builders/);
 });
 
-test("writeDefaultConfig --trust adds --trust to cursor-cli agents", () => {
+test("writeDefaultConfig --trust adds --trust to the Composer worker", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-trust-"));
   const filePath = writeDefaultConfig(dir, { trust: true });
   const config = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  const cursorAgents = config.agents.filter((agent) => agent.kind === "cursor-cli");
-  assert.ok(cursorAgents.length > 0);
-  for (const role of ["planner", "builder-a", "builder-b", "reviewer", "scout-a", "scout-b", "scout-c", "scout-d"]) {
-    assert.ok(cursorAgents.find((agent) => agent.role === role), `${role} should be configured`);
-  }
-  for (const agent of cursorAgents) {
-    assert.deepEqual(agent.args, ["--trust"]);
-  }
+  assert.equal("agents" in config, false);
+  assert.equal("defaultRoles" in config.swarm, false);
+  assert.deepEqual(config.workers.composer.args, ["--trust"]);
 });
 
 test("resolveWorkspaceContext finds nested git repos when cwd is outside git", () => {
@@ -498,11 +542,7 @@ test("verifyCandidate runs shell checks and classifies baseline failures", async
   const repo = makeRepo();
   const fake = makeFakeCursorAgent(repo);
   const config = configWithCursor(fake.scriptPath);
-  config.agents = config.agents.map((agent) =>
-    agent.role === "verifier"
-      ? { ...agent, command: "bash", args: ["-lc", "npm test"], kind: "shell" }
-      : agent
-  );
+  config.workers.verifier = { kind: "shell", command: "bash", args: ["-lc", "npm test"] };
   fs.writeFileSync(
     path.join(repo, "package.json"),
     JSON.stringify({ scripts: { test: "node -e \"process.exit(1)\"" } }, null, 2),

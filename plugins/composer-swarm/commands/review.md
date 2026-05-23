@@ -14,7 +14,7 @@ Core constraints:
 - This command is review-only.
 - Composer workers use Cursor model `composer-2.5-fast` only.
 - Do not fix issues, apply patches, or suggest that you are about to make changes.
-- The task uses planner + optional scout + reviewer workers; no builder patches are created.
+- The task is read-only; optional scout passes add broader search, and no implementation patches are created.
 - Return the runtime output directly after launch or completion.
 
 Execution mode rules:

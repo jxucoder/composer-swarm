@@ -110,7 +110,8 @@ Runtime config lives at `.composer-swarm/config.json` in the target project. See
 [swarm.config.example.json](../swarm.config.example.json) or run `composer-swarm example-config`.
 
 - `distribution.defaultWorkerModel` must stay `composer-2.5-fast`.
-- `verify` requires a shell `verifier` agent. The default config includes one.
+- `workers.composer` configures the `cursor-agent` command used for Composer workers.
+- `verify` requires `workers.verifier`. The default config runs `npm test`.
 - A top-level `policies` field is ignored if present; it is stripped during config load and has no effect in
   v1.
 
@@ -123,12 +124,12 @@ Runtime state is stored in the target project:
   config.json
   state/
     tasks/<task-id>.json
-    transcripts/<task-id>/<role>.jsonl
+    transcripts/<task-id>/<worker-label>.jsonl
     artifacts/<task-id>/<candidate-id>.patch
-    worktrees/<task-id>/<role>/
+    worktrees/<task-id>/<worker-label>/
 ```
 
-Commit `.composer-swarm/config.json` if the team configuration is useful to the project. Ignore
+Commit `.composer-swarm/config.json` if the worker commands are useful to the project. Ignore
 `.composer-swarm/state/`.
 
 ## Manual Release Checks

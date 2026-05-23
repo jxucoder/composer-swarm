@@ -165,40 +165,35 @@ test("Codex skill packaging stays synced between repo root and plugin bundle", (
 });
 
 test("splitRawArgumentString and normalizeArgv handle quoted slash-command args", () => {
-  assert.deepEqual(splitRawArgumentString('fix "quoted task" --roles reviewer'), [
+  assert.deepEqual(splitRawArgumentString('fix "quoted task" --background'), [
     "fix",
     "quoted task",
-    "--roles",
-    "reviewer"
+    "--background"
   ]);
-  assert.deepEqual(normalizeArgv(['fix "quoted task" --roles reviewer']), [
+  assert.deepEqual(normalizeArgv(['fix "quoted task" --background']), [
     "fix",
     "quoted task",
-    "--roles",
-    "reviewer"
+    "--background"
   ]);
-  assert.deepEqual(normalizeArgv(["fix", "quoted task", "--roles", "reviewer"]), [
+  assert.deepEqual(normalizeArgv(["fix", "quoted task", "--background"]), [
     "fix",
     "quoted task",
-    "--roles",
-    "reviewer"
+    "--background"
   ]);
-  assert.deepEqual(normalizeArgv(['fix "quoted task" --roles reviewer', "--wait"]), [
-    'fix "quoted task" --roles reviewer',
+  assert.deepEqual(normalizeArgv(['fix "quoted task" --background', "--wait"]), [
+    'fix "quoted task" --background',
     "--wait"
   ]);
-  assert.deepEqual(normalizePluginArgv(['fix "quoted task" --roles reviewer', "--wait"]), [
+  assert.deepEqual(normalizePluginArgv(['fix "quoted task" --background', "--wait"]), [
     "fix",
     "quoted task",
-    "--roles",
-    "reviewer",
+    "--background",
     "--wait"
   ]);
-  assert.deepEqual(normalizePackagedPluginArgv(['fix "quoted task" --roles reviewer', "--wait"]), [
+  assert.deepEqual(normalizePackagedPluginArgv(['fix "quoted task" --background', "--wait"]), [
     "fix",
     "quoted task",
-    "--roles",
-    "reviewer",
+    "--background",
     "--wait"
   ]);
 });
@@ -207,14 +202,15 @@ test("CLI accepts quoted raw slash-command arguments", () => {
   const repo = makeRepo();
   const result = spawnSync(
     process.execPath,
-    [CLI, "plan", 'fix "quoted task" --roles builder-a,reviewer'],
+    [CLI, "plan", 'fix "quoted task"'],
     { cwd: repo, encoding: "utf8" }
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Objective: fix quoted task/);
-  assert.match(result.stdout, /builder-a: composer-builder-a/);
-  assert.match(result.stdout, /reviewer: composer-reviewer/);
-  assert.doesNotMatch(result.stdout, /builder-b:/);
+  assert.match(result.stdout, /Execution plan:/);
+  assert.match(result.stdout, /implementation pass A \(can edit\)/);
+  assert.match(result.stdout, /review pass \(read-only\)/);
+  assert.doesNotMatch(result.stdout, /composer-builder-a/);
 });
 
 test("setup can initialize trusted config from the friendly entrypoint", () => {
@@ -239,19 +235,17 @@ test("setup can initialize trusted config from the friendly entrypoint", () => {
   assert.match(payload.initialized, /\.composer-swarm\/config\.json$/);
 
   const config = JSON.parse(fs.readFileSync(path.join(repo, ".composer-swarm", "config.json"), "utf8"));
-  const cursorAgents = config.agents.filter((agent) => agent.kind === "cursor-cli");
   assert.equal(config.distribution.defaultWorkerModel, "composer-2.5-fast");
-  assert.ok(cursorAgents.length > 0);
-  for (const agent of cursorAgents) {
-    assert.deepEqual(agent.args, ["--trust"]);
-  }
+  assert.equal("agents" in config, false);
+  assert.equal("defaultRoles" in config.swarm, false);
+  assert.deepEqual(config.workers.composer.args, ["--trust"]);
 });
 
 test("plugin script forwards a single raw argument string to the CLI", () => {
   const repo = makeRepo();
   const result = spawnSync(
     process.execPath,
-    [path.join(PLUGIN_ROOT, "scripts", "composer-swarm.mjs"), "plan", 'fix "quoted task" --roles reviewer'],
+    [path.join(PLUGIN_ROOT, "scripts", "composer-swarm.mjs"), "plan", 'fix "quoted task"'],
     {
       cwd: repo,
       encoding: "utf8",
@@ -263,8 +257,9 @@ test("plugin script forwards a single raw argument string to the CLI", () => {
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Objective: fix quoted task/);
-  assert.match(result.stdout, /reviewer: composer-reviewer/);
-  assert.doesNotMatch(result.stdout, /builder-a:/);
+  assert.match(result.stdout, /implementation pass A \(can edit\)/);
+  assert.match(result.stdout, /review pass \(read-only\)/);
+  assert.doesNotMatch(result.stdout, /composer-reviewer/);
 });
 
 test("plugin script forwards multi-token arguments to the CLI", () => {
@@ -275,9 +270,7 @@ test("plugin script forwards multi-token arguments to the CLI", () => {
       path.join(PLUGIN_ROOT, "scripts", "composer-swarm.mjs"),
       "plan",
       "fix",
-      "quoted task",
-      "--roles",
-      "reviewer"
+      "quoted task"
     ],
     {
       cwd: repo,
@@ -290,5 +283,5 @@ test("plugin script forwards multi-token arguments to the CLI", () => {
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Objective: fix quoted task/);
-  assert.match(result.stdout, /reviewer: composer-reviewer/);
+  assert.match(result.stdout, /review pass \(read-only\)/);
 });

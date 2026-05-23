@@ -16,12 +16,12 @@ Runtime state:
   config.json
   state/
     tasks/<task-id>.json
-    transcripts/<task-id>/<role>.jsonl
+    transcripts/<task-id>/<worker-label>.jsonl
     artifacts/<task-id>/<candidate-id>.patch
-    worktrees/<task-id>/<role>/
+    worktrees/<task-id>/<worker-label>/
 ```
 
-Commit `.composer-swarm/config.json` when the team configuration is useful. Ignore `.composer-swarm/state/`.
+Commit `.composer-swarm/config.json` when the worker commands are useful. Ignore `.composer-swarm/state/`.
 
 ## Config Schema
 
@@ -37,22 +37,24 @@ Top-level fields:
 | Field | Purpose |
 |---|---|
 | `version` | Config format version |
-| `swarm` | Swarm name, state directory, default roles |
+| `swarm` | Swarm name and state directory |
 | `distribution` | Host and worker defaults |
-| `agents` | Worker definitions used by `doctor`, `team`, and `review` |
+| `workers.composer` | The Cursor/Composer CLI command used for all Composer workers |
+| `workers.verifier` | Optional shell command used by `verify` |
 
 **Enforced at runtime:**
 
 - `distribution.defaultWorkerModel` must be `composer-2.5-fast`. Other values fail `doctor` and are rejected
   when launching workers.
-- Cursor worker agents must resolve to an available `cursor-agent` command.
-- `verify` requires a shell `verifier` agent when that command is run. The default config includes one.
+- `workers.composer.command` must resolve to an available `cursor-agent` command.
+- `verify` requires `workers.verifier` when that command is run. The default config includes one.
 
 **Informational only:**
 
 - `distribution.userPromise`, `primaryHosts`, and `defaultWorkerKind` are shown in `doctor` output but are
   not otherwise enforced.
-- `swarm.defaultRoles` documents the default team shape; task commands choose roles directly.
+- The runtime chooses the internal worker phases from `team --builders` or `review --scouts`.
+- Existing legacy configs with an `agents` array are still accepted, but new configs should not use it.
 
 **Ignored if present:**
 
@@ -71,16 +73,12 @@ Composer workers are launched through `cursor-agent` with:
 fast and low-cost enough to spend on wider code search, additional reasoning, review-only passes, and
 alternate implementation attempts while the host agent owns final judgment.
 
-Default roles:
+Default implementation work uses one planning pass, one to four isolated implementation attempts, and one
+review pass. Review-only work uses one planning pass, optional read-only scout passes, and one review pass.
+These worker labels are runtime state, not user-configured personas.
 
-- `planner`: decomposes the task and identifies risks
-- `builder-a`: attempts the smallest direct implementation
-- `builder-b`: attempts an alternate implementation or parallel subtask
-- `reviewer`: reviews candidate patches for defects and regressions
-- `verifier`: runs deterministic shell checks
-
-Planner and reviewer workers run in Cursor plan mode. Builders run with edit access inside isolated git
-worktrees only.
+Planning, scout, and review passes run in Cursor plan mode. Implementation workers run with edit access
+inside isolated git worktrees only.
 
 ## CLI Reference
 
@@ -88,8 +86,7 @@ worktrees only.
 composer-swarm init [--force] [--trust]
 composer-swarm setup [--init] [--trust] [--force] [--json]
 composer-swarm doctor
-composer-swarm agents
-composer-swarm plan <task text> [--roles a,b,c]
+composer-swarm plan <task text>
 composer-swarm team <task text> [--builders 2] [--background|--wait]
 composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
 composer-swarm status [task-id]
@@ -104,8 +101,8 @@ composer-swarm cleanup [task-id]
 `team` waits by default. `--background` starts a detached local runner and stores task state so `status` and
 `result` can inspect it later.
 
-`setup` checks git, config, Node, configured Cursor agents, and configured shell verifier commands. `setup
---init --trust` writes `.composer-swarm/config.json` with trusted Cursor worker args.
+`setup` checks git, config, Node, the configured Composer worker command, and the configured shell verifier
+command. `setup --init --trust` writes `.composer-swarm/config.json` with trusted Composer worker args.
 
 ## Reviews
 
@@ -117,7 +114,8 @@ composer-swarm review --preset security
 composer-swarm review --preset tests
 ```
 
-Review tasks run planner and reviewer workers, plus optional read-only scouts. They do not create builder patches.
+Review tasks run a read-only review workflow with optional scout passes. They do not create implementation
+patches.
 
 ## Results
 

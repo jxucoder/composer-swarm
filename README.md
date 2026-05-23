@@ -10,7 +10,7 @@ control of judgment and apply.
 ## What You Get
 
 - `/composer:team` to hand a coding task to isolated Composer workers for broader search and candidate patches
-- `/composer:review` for a review-only planner + optional scout + reviewer pass
+- `/composer:review` for review-only broader search and extra critique
 - `/composer:status` and `/composer:result` to follow background work
 - `/composer:verify` to run configured checks against candidates
 - `/composer:apply` to apply exactly one selected candidate patch
@@ -101,7 +101,7 @@ workflow calls for them. Without skill support, tell Codex to use the CLI direct
 - [Technical spec](docs/technical-spec.md)
 - [Repo-only release notes](docs/repo-only-release.md)
 - [Architecture](docs/architecture.md)
-- [Agent protocol](docs/protocol.md)
+- [Worker protocol](docs/protocol.md)
 - [Host adapters](docs/adapters.md)
 
 ## License

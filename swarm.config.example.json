@@ -2,8 +2,7 @@
   "version": 1,
   "swarm": {
     "name": "composer-swarm",
-    "stateDir": ".composer-swarm/state",
-    "defaultRoles": ["planner", "builder-a", "builder-b", "reviewer", "verifier"]
+    "stateDir": ".composer-swarm/state"
   },
   "distribution": {
     "userPromise": "Add a team of Composer workers to the coding agent you already use.",
@@ -11,77 +10,16 @@
     "defaultWorkerKind": "cursor-cli",
     "defaultWorkerModel": "composer-2.5-fast"
   },
-  "agents": [
-    {
-      "id": "host-operator",
-      "kind": "host",
-      "role": "operator",
-      "canEdit": false,
-      "notes": "The user's current cockpit: Claude Code, Codex, or another agent."
-    },
-    {
-      "id": "composer-planner",
+  "workers": {
+    "composer": {
       "kind": "cursor-cli",
-      "role": "planner",
       "command": "cursor-agent",
-      "canEdit": false
+      "args": ["--trust"]
     },
-    {
-      "id": "composer-builder-a",
-      "kind": "cursor-cli",
-      "role": "builder-a",
-      "command": "cursor-agent",
-      "canEdit": true
-    },
-    {
-      "id": "composer-builder-b",
-      "kind": "cursor-cli",
-      "role": "builder-b",
-      "command": "cursor-agent",
-      "canEdit": true
-    },
-    {
-      "id": "composer-reviewer",
-      "kind": "cursor-cli",
-      "role": "reviewer",
-      "command": "cursor-agent",
-      "canEdit": false
-    },
-    {
-      "id": "composer-scout-a",
-      "kind": "cursor-cli",
-      "role": "scout-a",
-      "command": "cursor-agent",
-      "canEdit": false
-    },
-    {
-      "id": "composer-scout-b",
-      "kind": "cursor-cli",
-      "role": "scout-b",
-      "command": "cursor-agent",
-      "canEdit": false
-    },
-    {
-      "id": "composer-scout-c",
-      "kind": "cursor-cli",
-      "role": "scout-c",
-      "command": "cursor-agent",
-      "canEdit": false
-    },
-    {
-      "id": "composer-scout-d",
-      "kind": "cursor-cli",
-      "role": "scout-d",
-      "command": "cursor-agent",
-      "canEdit": false
-    },
-    {
-      "id": "shell-verifier",
+    "verifier": {
       "kind": "shell",
-      "role": "verifier",
       "command": "bash",
-      "args": ["-lc", "npm test"],
-      "canEdit": false
+      "args": ["-lc", "npm test"]
     }
-  ]
+  }
 }

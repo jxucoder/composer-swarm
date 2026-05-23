@@ -39,8 +39,7 @@ Usage:
   composer-swarm init [--force] [--trust]
   composer-swarm setup [--init] [--trust] [--force] [--json]
   composer-swarm doctor
-  composer-swarm agents
-  composer-swarm plan <task text> [--roles a,b,c]
+  composer-swarm plan <task text>
   composer-swarm team <task text> [--builders 2] [--background|--wait]
   composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
   composer-swarm status [task-id]
@@ -81,16 +80,6 @@ function parseArgs(rawArgs, optionNames = []) {
     }
   }
   return { options, positionals };
-}
-
-function readRoles(options) {
-  if (!options.roles) {
-    return null;
-  }
-  return String(options.roles)
-    .split(",")
-    .map((role) => role.trim())
-    .filter(Boolean);
 }
 
 function readTaskText(positionals) {
@@ -257,7 +246,7 @@ async function main() {
     const filePath = writeDefaultConfig(cwd, { force, trust });
     console.log(`Wrote ${filePath}`);
     if (trust) {
-      console.log("Cursor CLI agents configured with --trust for isolated worktrees.");
+      console.log("Composer worker configured with --trust for isolated worktrees.");
     }
     return;
   }
@@ -288,17 +277,13 @@ async function main() {
     return;
   }
 
-  if (command === "agents") {
-    const { config } = workspaceContext(cwd);
-    for (const agent of config.agents ?? []) {
-      const commandText = [agent.command, ...(agent.args ?? [])].filter(Boolean).join(" ");
-      console.log(`${agent.id}\t${agent.kind}\t${agent.role}\t${commandText || "(host-driven)"}`);
-    }
-    return;
-  }
-
   if (command === "plan") {
-    const { options, positionals } = parseArgs(args, ["roles"]);
+    const { options, positionals } = parseArgs(args, []);
+    if (options.roles) {
+      console.error("composer-swarm plan no longer accepts worker selection flags. Use team --builders or review --scouts.");
+      process.exitCode = 2;
+      return;
+    }
     const taskText = readTaskText(positionals);
     if (!taskText) {
       console.error("Missing task text.");
@@ -306,7 +291,7 @@ async function main() {
       return;
     }
     const { config } = workspaceContext(cwd);
-    const plan = planTask(config, taskText, { roles: readRoles(options) });
+    const plan = planTask(config, taskText);
     console.log(formatPlan(plan));
     return;
   }

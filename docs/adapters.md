@@ -5,20 +5,27 @@ provide fast parallel search, extra reasoning, review passes, and candidate exec
 
 ## Adapter Model
 
-An adapter maps a swarm task to an agent-specific execution method.
+An adapter maps a swarm task to a concrete execution method. The user config stays small:
 
 ```json
 {
-  "id": "composer-builder-a",
-  "kind": "cursor-cli",
-  "role": "builder-a",
-  "command": "cursor-agent",
-  "canEdit": true
+  "workers": {
+    "composer": {
+      "kind": "cursor-cli",
+      "command": "cursor-agent",
+      "args": ["--trust"]
+    },
+    "verifier": {
+      "kind": "shell",
+      "command": "bash",
+      "args": ["-lc", "npm test"]
+    }
+  }
 }
 ```
 
 Adapters should stay small. The swarm runtime owns task state; adapters only translate task envelopes into
-agent invocations and translate output back into events.
+worker invocations and translate output back into events.
 
 ## Claude Code Integration
 
@@ -75,11 +82,9 @@ The Cursor/Composer adapter should be treated as a worker adapter:
 
 ```json
 {
-  "id": "composer-builder-a",
   "kind": "cursor-cli",
-  "role": "builder-a",
   "command": "cursor-agent",
-  "canEdit": true
+  "args": ["--trust"]
 }
 ```
 
@@ -88,19 +93,17 @@ Otherwise, a `cursor-plugin-cc` style bridge can act as the adapter.
 
 ## Generic Shell Agent
 
-The generic adapter is the compatibility escape hatch:
+The generic shell adapter is the compatibility escape hatch for deterministic checks:
 
 ```json
 {
-  "id": "shell-verifier",
   "kind": "shell",
-  "role": "verifier",
   "command": "bash",
   "args": ["-lc", "npm test"]
 }
 ```
 
-Generic shell agents are useful for deterministic checks, formatting, local scripts, and human-provided
+Generic shell workers are useful for deterministic checks, formatting, local scripts, and human-provided
 commands.
 
 ## MCP Server Wrapper Future Work

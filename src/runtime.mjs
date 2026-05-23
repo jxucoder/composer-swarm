@@ -41,8 +41,7 @@ export function defaultConfig() {
     version: 1,
     swarm: {
       name: "composer-swarm",
-      stateDir: DEFAULT_STATE_DIR,
-      defaultRoles: ["planner", "builder-a", "builder-b", "reviewer", "verifier"]
+      stateDir: DEFAULT_STATE_DIR
     },
     distribution: {
       userPromise: "Add a team of Composer workers to the coding agent you already use.",
@@ -50,58 +49,17 @@ export function defaultConfig() {
       defaultWorkerKind: "cursor-cli",
       defaultWorkerModel: DEFAULT_CURSOR_MODEL
     },
-    agents: [
-      {
-        id: "host-operator",
-        kind: "host",
-        role: "operator",
-        canEdit: false,
-        notes: "The user's current cockpit: Claude Code, Codex, or another agent."
-      },
-      {
-        id: "composer-planner",
+    workers: {
+      composer: {
         kind: "cursor-cli",
-        role: "planner",
-        command: "cursor-agent",
-        canEdit: false
+        command: "cursor-agent"
       },
-      {
-        id: "composer-builder-a",
-        kind: "cursor-cli",
-        role: "builder-a",
-        command: "cursor-agent",
-        canEdit: true
-      },
-      {
-        id: "composer-builder-b",
-        kind: "cursor-cli",
-        role: "builder-b",
-        command: "cursor-agent",
-        canEdit: true
-      },
-      {
-        id: "composer-reviewer",
-        kind: "cursor-cli",
-        role: "reviewer",
-        command: "cursor-agent",
-        canEdit: false
-      },
-      ...SCOUT_SUFFIXES.map((suffix) => ({
-        id: `composer-scout-${suffix}`,
-        kind: "cursor-cli",
-        role: `scout-${suffix}`,
-        command: "cursor-agent",
-        canEdit: false
-      })),
-      {
-        id: "shell-verifier",
+      verifier: {
         kind: "shell",
-        role: "verifier",
         command: "bash",
-        args: ["-lc", "npm test"],
-        canEdit: false
+        args: ["-lc", "npm test"]
       }
-    ]
+    }
   };
 }
 
@@ -142,9 +100,10 @@ export function writeDefaultConfig(cwd, options = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const config = defaultConfig();
   if (options.trust) {
-    config.agents = config.agents.map((agent) =>
-      agent.kind === "cursor-cli" ? { ...agent, args: ["--trust"] } : agent
-    );
+    config.workers.composer = {
+      ...config.workers.composer,
+      args: [...new Set([...(config.workers.composer.args ?? []), "--trust"])]
+    };
   }
   fs.writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return filePath;
@@ -159,7 +118,7 @@ export function loadConfig(cwd) {
   const base = defaultConfig();
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
   const { policies: _unusedPolicies, ...parsedConfig } = parsed;
-  return {
+  const config = {
     ...base,
     ...parsedConfig,
     swarm: {
@@ -170,8 +129,18 @@ export function loadConfig(cwd) {
       ...base.distribution,
       ...(parsed.distribution ?? {})
     },
-    agents: Array.isArray(parsed.agents) ? parsed.agents : base.agents
+    workers: {
+      ...base.workers,
+      ...(parsed.workers ?? {})
+    }
   };
+  if (Array.isArray(parsed.agents)) {
+    config.agents = parsed.agents;
+  } else {
+    delete config.agents;
+  }
+  delete config.swarm.defaultRoles;
+  return config;
 }
 
 function commandAvailable(command) {
@@ -222,19 +191,27 @@ export function runDoctor(config) {
     lines.push("- git: missing command");
   }
 
-  lines.push(`Agents: ${(config.agents ?? []).length}`);
-  for (const agent of config.agents ?? []) {
-    const available = commandAvailable(agent.command);
-    if (available === null) {
-      lines.push(`- ${agent.id}: host-driven (${agent.kind}, role=${agent.role})`);
-      continue;
-    }
-    if (available) {
-      const trustNote = agent.kind === "cursor-cli" && (agent.args ?? []).includes("--trust") ? " [trust]" : "";
-      lines.push(`- ${agent.id}: ok (${agent.command})${trustNote}`);
+  lines.push("Workers:");
+  const composer = agentForRole(config, "builder-a");
+  const composerAvailable = commandAvailable(composer.command);
+  if (composerAvailable) {
+    const trustNote = (composer.args ?? []).includes("--trust") ? " [trust]" : "";
+    lines.push(`- composer: ok (${composer.command})${trustNote}`);
+  } else {
+    ok = false;
+    lines.push(`- composer: missing command (${composer.command})`);
+  }
+
+  const verifier = verifierAgent(config);
+  if (!verifier) {
+    lines.push("- verifier: not configured");
+  } else {
+    const verifierAvailable = commandAvailable(verifier.command);
+    if (verifierAvailable) {
+      lines.push(`- verifier: ok (${[verifier.command, ...(verifier.args ?? [])].join(" ")})`);
     } else {
       ok = false;
-      lines.push(`- ${agent.id}: missing command (${agent.command})`);
+      lines.push(`- verifier: missing command (${verifier.command})`);
     }
   }
 
@@ -242,7 +219,34 @@ export function runDoctor(config) {
 }
 
 function agentForRole(config, role) {
-  return (config.agents ?? []).find((agent) => agent.role === role) ?? null;
+  const legacyExact = (config.agents ?? []).find((agent) => agent.role === role && agent.kind === "cursor-cli");
+  if (legacyExact) {
+    return {
+      ...legacyExact,
+      canEdit: role.startsWith("builder-")
+    };
+  }
+  const worker = config.workers?.composer;
+  if (worker?.command) {
+    return {
+      id: `${worker.id ?? "composer"}-${role}`,
+      kind: worker.kind ?? "cursor-cli",
+      role,
+      command: worker.command,
+      args: worker.args ?? [],
+      canEdit: role.startsWith("builder-")
+    };
+  }
+  const legacyAny = (config.agents ?? []).find((agent) => agent.kind === "cursor-cli" && agent.command);
+  if (legacyAny) {
+    return {
+      ...legacyAny,
+      id: `${legacyAny.id ?? "composer"}-${role}`,
+      role,
+      canEdit: role.startsWith("builder-")
+    };
+  }
+  return fallbackCursorAgent(role);
 }
 
 function fallbackCursorAgent(role) {
@@ -267,21 +271,18 @@ export function resolveCursorModel(config, requestedModel = null) {
 }
 
 export function planTask(config, taskText, options = {}) {
-  const roles = options.roles?.length ? options.roles : config.swarm?.defaultRoles ?? [];
+  const roles = executionRoles(options);
+  const workers = roles.map((role) => ({
+    phase: role,
+    role,
+    canEdit: role.startsWith("builder-"),
+    objective: roleObjective(role, taskText)
+  }));
   return {
     schema: "composer-swarm.plan.v1",
     objective: taskText,
-    roles: roles.map((role) => {
-      const agent = agentForRole(config, role);
-      return {
-        role,
-        agentId: agent?.id ?? null,
-        kind: agent?.kind ?? null,
-        canEdit: Boolean(agent?.canEdit),
-        status: agent ? "mapped" : "unmapped",
-        objective: roleObjective(role, taskText)
-      };
-    })
+    workers,
+    roles: workers
   };
 }
 
@@ -290,11 +291,11 @@ function roleObjective(role, taskText) {
     case "operator":
       return `Stay in the user's current host, supervise the Composer team, and choose the final patch: ${taskText}`;
     case "planner":
-      return `Decompose the task, identify file scopes, and define acceptance criteria for Composer builders: ${taskText}`;
+      return `Prepare a concise implementation plan, likely file scopes, acceptance criteria, risks, and checks: ${taskText}`;
     case "builder-a":
-      return `Attempt the smallest direct implementation in an isolated worktree: ${taskText}`;
+      return `Produce the smallest direct implementation attempt in an isolated worktree: ${taskText}`;
     case "builder-b":
-      return `Attempt an alternate implementation or parallel subtask in an isolated worktree: ${taskText}`;
+      return `Produce an alternate implementation attempt or parallel subtask in an isolated worktree: ${taskText}`;
     case "scout-a":
       return `Inspect architecture and runtime flow without editing files: ${taskText}`;
     case "scout-b":
@@ -304,14 +305,14 @@ function roleObjective(role, taskText) {
     case "scout-d":
       return `Inspect usability, maintenance, and edge-case risks without editing files: ${taskText}`;
     case "reviewer":
-      return `Review candidate Composer patches for concrete defects, regressions, and missing tests: ${taskText}`;
+      return `Review candidate patches for concrete defects, regressions, and missing tests: ${taskText}`;
     case "adversary":
       return `Challenge assumptions, edge cases, and whether the approach is too complex: ${taskText}`;
     case "verifier":
       return `Run or define reproducible checks against the selected candidate and report exact results: ${taskText}`;
     default:
       if (role.startsWith("builder-")) {
-        return `Attempt an implementation in an isolated worktree: ${taskText}`;
+        return `Produce an implementation attempt in an isolated worktree: ${taskText}`;
       }
       if (role.startsWith("scout-")) {
         return `Inspect a focused repo area without editing files and report concrete findings: ${taskText}`;
@@ -321,13 +322,30 @@ function roleObjective(role, taskText) {
 }
 
 export function formatPlan(plan) {
-  const lines = [`Objective: ${plan.objective}`, "", "Composer team:"];
-  for (const entry of plan.roles) {
-    const agent = entry.agentId ? `${entry.agentId} (${entry.kind})` : "unmapped";
-    lines.push(`- ${entry.role}: ${agent}`);
+  const lines = [`Objective: ${plan.objective}`, "", "Execution plan:"];
+  for (const entry of plan.workers ?? plan.roles ?? []) {
+    const label = workerDisplayName(entry.phase ?? entry.role);
+    const access = entry.canEdit ? "can edit" : "read-only";
+    lines.push(`- ${label} (${access})`);
     lines.push(`  ${entry.objective}`);
   }
   return lines.join("\n");
+}
+
+function workerDisplayName(label) {
+  if (label === "planner") {
+    return "planning pass";
+  }
+  if (label === "reviewer") {
+    return "review pass";
+  }
+  if (label?.startsWith("builder-")) {
+    return `implementation pass ${label.slice("builder-".length).toUpperCase()}`;
+  }
+  if (label?.startsWith("scout-")) {
+    return `scout pass ${label.slice("scout-".length).toUpperCase()}`;
+  }
+  return label ?? "worker";
 }
 
 export function stateRoot(config, workspaceRoot) {
@@ -1331,7 +1349,20 @@ export function extractRecommendedCandidate(task) {
 }
 
 function verifierAgent(config) {
-  return (config.agents ?? []).find((agent) => agent.role === "verifier" && agent.kind === "shell") ?? null;
+  const legacyExact = (config.agents ?? []).find((agent) => agent.role === "verifier" && agent.kind === "shell");
+  if (legacyExact) {
+    return legacyExact;
+  }
+  const worker = config.workers?.verifier;
+  if (worker?.command) {
+    return {
+      id: worker.id ?? "verifier",
+      kind: worker.kind ?? "shell",
+      command: worker.command,
+      args: worker.args ?? []
+    };
+  }
+  return null;
 }
 
 function runShellCheck(agent, cwd) {
@@ -1400,7 +1431,7 @@ export function verifyCandidate(config, workspaceRoot, taskId, requestedCandidat
 
   const agent = verifierAgent(config);
   if (!agent) {
-    throw new Error("No shell verifier agent configured. Add a verifier agent to .composer-swarm/config.json.");
+    throw new Error("No shell verifier configured. Add workers.verifier to .composer-swarm/config.json.");
   }
 
   const baselineAware = options.baseline !== false;

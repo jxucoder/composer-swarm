@@ -40,7 +40,7 @@ For Claude Code:
 For Codex:
 
 ```text
-Use composer-swarm to spin up two Composer builders and one Composer reviewer.
+Use composer-swarm to run two Composer implementation attempts and a review pass.
 ```
 
 Expected result:
@@ -78,7 +78,7 @@ For each task:
 
 1. Snapshot the current repo state.
 2. Create N git worktrees under `.composer-swarm/state/worktrees/<task-id>/`.
-3. Start one `cursor-agent` process per worker with a role-specific prompt.
+3. Start one `cursor-agent` process per worker with a task-specific prompt.
 4. Capture each worker's transcript, diff, status, and checks.
 5. Summarize candidates for the host.
 6. Apply the selected patch into the main checkout.
@@ -92,7 +92,7 @@ Each worker returns:
 ```json
 {
   "candidateId": "task_123-builder-a",
-  "role": "builder-a",
+  "worker": "builder-a",
   "worktree": ".composer-swarm/state/worktrees/task_123/builder-a",
   "summary": "Fixed checkout validation with a narrow guard.",
   "patchFile": ".composer-swarm/state/artifacts/task_123-builder-a.patch",

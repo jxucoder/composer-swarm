@@ -95,18 +95,14 @@ reliable from existing hosts.
 Composer workers are launched through `cursor-agent` or a compatible Cursor/Composer CLI and pinned to
 Cursor model `composer-2.5-fast`.
 
-Default roles:
-
-- `planner`: identifies decomposition and risks
-- `builder-a`: attempts the smallest direct implementation
-- `builder-b`: attempts an alternate implementation or parallel subtask
-- `reviewer`: reviews candidate patches and points out concrete defects
-- `verifier`: runs deterministic checks where possible
+The user config only names the Composer CLI command and optional verifier command. The runtime picks the
+worker shape from command flags: `team --builders <1-4>` for implementation work, and `review --scouts
+<0-4>` for read-only review work.
 
 Every worker adapter implements the same contract:
 
 ```text
-input:  task envelope + workspace context + role instructions
+input:  task envelope + workspace context + worker instructions
 output: JSONL events + final result envelope
 ```
 
@@ -126,9 +122,9 @@ Repo-local state is useful for collaboration, but runtime metadata should be eas
   config.json
   state/
     tasks/<task-id>.json
-    transcripts/<task-id>/<role>.jsonl
+    transcripts/<task-id>/<worker-label>.jsonl
     artifacts/<task-id>/<candidate-id>.patch
-    worktrees/<task-id>/<role>/
+    worktrees/<task-id>/<worker-label>/
 ```
 
 Recommended `.gitignore`:
@@ -148,7 +144,6 @@ created -> running -> patches-collected -> completed -> applied|failed|cancelled
 Each task has:
 
 - task id
-- role
 - objective
 - acceptance criteria
 - allowed files or scope
@@ -157,17 +152,6 @@ Each task has:
 - lease holder
 - events
 - final result
-
-## Roles
-
-Default role mapping:
-
-- host/operator -> Claude Code or Codex
-- planner -> Composer
-- builder-a -> Composer
-- builder-b -> Composer
-- reviewer -> Composer, optionally Codex as a second-opinion reviewer
-- verifier -> shell commands or Composer
 
 ## Isolation
 
@@ -190,13 +174,13 @@ Lease shape:
 ```json
 {
   "taskId": "task_123",
-  "agentId": "composer-builder-a",
+  "workerId": "composer-builder-a",
   "paths": ["src/auth/**"],
   "expiresAt": "2026-05-22T20:00:00.000Z"
 }
 ```
 
-If two agents need the same paths, the coordinator should serialize them or split the task.
+If two workers need the same paths, the coordinator should serialize them or split the task.
 
 ## Recommended MVP
 
