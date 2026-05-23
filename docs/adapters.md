@@ -53,7 +53,7 @@ remain CLI-backed workers, not native Claude teammates.
 
 ## Codex Integration
 
-Codex should get a skill with simple operating rules:
+Codex environments that support local skills or plugins should get a skill with simple operating rules:
 
 - use `composer-swarm setup` before starting; run `setup --init --trust` when config is missing
 - use `composer-swarm team "<task>"` to launch Composer workers
@@ -62,9 +62,10 @@ Codex should get a skill with simple operating rules:
 - run `composer-swarm verify` before recommending a candidate
 - apply the selected patch through `composer-swarm apply` only after explicit user approval
 
-Install the repo-local Codex plugin from `.agents/plugins/marketplace.json`, or copy
-`skills/composer-swarm/SKILL.md` into the Codex skills directory. Keep the plugin-packaged skill copy in sync
-with the repo-root skill file.
+Codex does not automatically load the repo-root skill just because the repository was cloned. Install the
+repo-local Codex plugin from `.agents/plugins/marketplace.json`, or copy `skills/composer-swarm/SKILL.md`
+into the skills directory your Codex setup uses. Keep the plugin-packaged skill copy in sync with the
+repo-root skill file.
 
 This lets Codex users get Composer parallelism without leaving Codex.
 

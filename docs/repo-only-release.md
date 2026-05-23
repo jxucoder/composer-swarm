@@ -77,10 +77,10 @@ Claude Code's background task support and preserve raw `$ARGUMENTS`.
 
 ## Codex Plugin And Skill
 
-Install the repo-local Codex plugin from `.agents/plugins/marketplace.json`, or copy
-`skills/composer-swarm/SKILL.md` into your Codex skills directory. The plugin-packaged copy lives at
-`plugins/composer-swarm/skills/composer-swarm/SKILL.md` and should stay identical to the repo-root skill
-file.
+If your Codex environment supports local skills or plugins, install the repo-local Codex plugin from
+`.agents/plugins/marketplace.json`, or copy `skills/composer-swarm/SKILL.md` into the skills directory your
+Codex setup uses. The plugin-packaged copy lives at `plugins/composer-swarm/skills/composer-swarm/SKILL.md`
+and should stay identical to the repo-root skill file.
 
 The skill tells Codex to:
 

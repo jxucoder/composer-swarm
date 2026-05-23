@@ -2,9 +2,9 @@
 
 Composer Swarm gives Claude Code or Codex a local team of Cursor/Composer workers.
 
-It is a repo-only v1 for agents: install the local Claude Code plugin or Codex skill, then ask your coding
-agent to delegate work to Composer Swarm when useful. The agent runs the CLI from your project, inspects
-candidate patches, verifies them, and asks before applying one.
+It is a repo-only v1 for agents: install the local Claude Code plugin, or give Codex the included skill
+instructions if your Codex environment supports local skills/plugins. The agent runs the CLI from your
+project, inspects candidate patches, verifies them, and asks before applying one.
 
 ## Quick Start
 
@@ -51,19 +51,22 @@ export COMPOSER_SWARM_REPO=/path/to/composer-swarm
 
 ## Codex
 
-Codex users can install the repo-local Codex plugin from
+Codex does not automatically load this repo's skill file just because the repo was cloned. If your Codex
+environment supports local skills or plugins, install the repo-local plugin from
 [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json), or copy
-[skills/composer-swarm/SKILL.md](skills/composer-swarm/SKILL.md) into their Codex skills directory.
+[skills/composer-swarm/SKILL.md](skills/composer-swarm/SKILL.md) into the skills directory your Codex setup
+uses.
 
-Then ask Codex naturally:
+Then ask Codex naturally from the project you want it to work on:
 
 ```text
 Use Composer Swarm to review this project.
 Use Composer Swarm to fix the failing tests with two builders.
 ```
 
-Codex will run setup/status/result/verify/apply commands from your project when the skill says they are
-needed. Direct CLI usage is documented in the [technical spec](docs/technical-spec.md).
+With the skill installed, Codex should run setup/status/result/verify/apply commands from your project when
+the workflow calls for them. Without skill support, tell Codex to use the CLI directly; the commands are in
+the [technical spec](docs/technical-spec.md).
 
 ## Safety Defaults
 

@@ -136,7 +136,9 @@ The command files copy the `codex-plugin-cc` pattern: preserve `$ARGUMENTS`, ret
 verbatim, and use the host background task primitive for background runs.
 
 Codex plugin metadata lives in `.agents/plugins/marketplace.json`, and the Codex skill lives in
-`skills/composer-swarm/SKILL.md`. The skill requires Codex to inspect results and ask before running `apply`.
+`skills/composer-swarm/SKILL.md`. Codex environments must explicitly support and install local skills or
+plugins before they will use that file. The skill requires Codex to inspect results and ask before running
+`apply`.
 
 ## Plugin Runtime Resolution
 
