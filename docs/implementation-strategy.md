@@ -15,7 +15,7 @@ Claude Code and Codex remain the cockpit. Composer 2.5 Fast workers add:
 
 - broader repo search
 - additional read-only reasoning
-- review-only critique
+- review-only scout leads
 - isolated implementation candidates
 - local transcripts, patches, and verification output
 
@@ -64,7 +64,8 @@ composer-swarm research "review the current rewrite" --snapshot-current
 ```
 
 For `research` and `review`, dirty and untracked files are snapshotted into isolated worker worktrees. These
-modes never create candidate patches and never expose apply commands.
+modes never create candidate patches and never expose apply commands. The host validates important findings;
+Composer review is supporting signal, not the reviewer of record.
 
 ### Implementation When Clean
 

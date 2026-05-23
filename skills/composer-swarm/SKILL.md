@@ -7,7 +7,7 @@ description: Delegate repo tasks to local Composer/Cursor workers for read-only 
 
 Use this skill when the user asks Codex to delegate repo research, implementation, or review work to Composer/Cursor workers, compare swarm candidates, verify candidates, or apply a selected patch.
 
-Operating split: Codex is the main agent. Fast, low-cost Composer workers provide broader code search, extra reasoning, read-only research, isolated candidate patches, and review-only checks. Codex verifies, compares, and applies only after explicit approval.
+Operating split: Codex is the main agent. Fast, low-cost Composer workers provide broader code search, extra reasoning, read-only scout leads, isolated candidate patches, and review-only checks. Codex verifies, compares, and applies only after explicit approval.
 
 Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the routine that decides when to call CLI tools. Each `composer-swarm` command is a tool call. Launching Composer workers is a bounded handoff to isolated worker processes. `.composer-swarm/state/` is the explicit context store. Control returns to Codex for verification, approval, and final action.
 
@@ -18,7 +18,7 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
 - Run commands from the target repository.
 - Composer workers must use Cursor model `composer-2.5-fast` only.
 - Composer workers edit isolated git worktrees; the Codex host supervises, compares, and chooses.
-- Research workers are read-only and produce evidence for Codex to verify.
+- Research and review workers are read-only and produce evidence for Codex to verify. Treat them as scouts, not reviewers of record.
 
 ## Default Flow
 
@@ -33,6 +33,8 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    ```bash
    composer-swarm setup --init --trust
    ```
+
+   After initialization, check `.composer-swarm/config.json` if verification matters. The runtime infers common verifiers, including `swift test` for Swift packages, but Codex should correct `workers.verifier` if the repo needs a different command.
 
 2. For broad, uncertain, or high-impact repo understanding, start your own normal investigation first. Then launch Composer Swarm research as a detached local run and keep researching locally while it runs.
 
@@ -59,7 +61,8 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    - focused research: 1-2 workers
    - broad research: 3-4 workers
    - quick read-only review: 0-1 scouts
-   - repo/release/security review: 2-4 scouts
+   - repo/release/security review: 1-2 scouts
+   - wide exploratory review: 3-4 scouts only when the user asks for breadth
 
    ```bash
    composer-swarm team "<task>" --builders <1-4> --background
@@ -115,8 +118,9 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
 ## Operating Rules
 
 - Do not apply a candidate patch without explicit user approval in the current conversation.
-- Do not use research output as authority. Use it as evidence-backed leads and verify important claims.
+- Do not use research or review output as authority. Use it as evidence-backed scout leads and verify important claims.
 - When using research, continue Codex's own local search instead of waiting idly for Composer.
+- Read-only workers run in Cursor plan mode. If they cannot execute shell/tests, do not treat that as a task failure; record it as a verification gap and run local checks yourself when needed.
 - `--recommended` is only a shortcut after the user approves the detected recommendation.
 - Treat reviewer recommendations as heuristic. Inspect patches yourself.
 - `verify` distinguishes baseline failures from candidate-specific failures.

@@ -15,6 +15,7 @@ import {
   createTeamTask,
   DEFAULT_CURSOR_MODEL,
   defaultConfig,
+  defaultVerifierForWorkspace,
   extractRecommendedCandidate,
   findNestedGitRepos,
   formatCandidateComparison,
@@ -325,17 +326,20 @@ test("worker prompts include objective, label, planner output, and candidate con
   const scoutPrompt = buildWorkerPrompt("scout-a", { ...task, options: { review: true } }, { plannerOutput: "inspect runtime" });
   assert.match(scoutPrompt, /Scout pass/);
   assert.match(scoutPrompt, /Do not edit files/);
+  assert.match(scoutPrompt, /plan\/read-only mode/);
   assert.match(scoutPrompt, /inspect runtime/);
-  assert.match(scoutPrompt, /Severity, File, Issue, Why it matters, Suggested fix, and Evidence/);
+  assert.match(scoutPrompt, /Severity, File, Issue, Why it matters, Suggested fix, Confidence, and Evidence/);
 
   const reviewPrompt = buildWorkerPrompt("reviewer", { ...task, options: { review: true, snapshotCurrent: true } });
   assert.match(reviewPrompt, /snapshot of the user's current uncommitted checkout/);
   assert.match(reviewPrompt, /Severity: high\|medium\|low/);
   assert.match(reviewPrompt, /Suggested fix:/);
+  assert.match(reviewPrompt, /Confidence: high\|medium\|low/);
 
   const researchPrompt = buildWorkerPrompt("research-a", { ...task, options: { research: true, focus: "architecture" } });
   assert.match(researchPrompt, /Research pass/);
   assert.match(researchPrompt, /Do not edit files/);
+  assert.match(researchPrompt, /Final answer only/);
   assert.match(researchPrompt, /Required output format/);
   assert.match(researchPrompt, /Requested focus: architecture/);
 });
@@ -357,6 +361,8 @@ test("workflow creates worktrees, records transcripts, captures modified and new
   const candidateB = stored.candidates.find((candidate) => candidate.workerLabel === "builder-b");
   assert.ok(candidateA.patchFile);
   assert.ok(candidateB.patchFile);
+  assert.equal(candidateA.summary, "builder-a done");
+  assert.doesNotMatch(stored.reviewer.notes, /reviewer progress/);
   assert.match(fs.readFileSync(candidateA.patchFile, "utf8"), /builder-a/);
   assert.match(fs.readFileSync(candidateB.patchFile, "utf8"), /new file mode/);
   assert.deepEqual(candidateA.changedFiles, ["src/app.txt"]);
@@ -466,8 +472,11 @@ test("review workflow can fan out to read-only scouts", async () => {
   assert.equal(invocations.find((entry) => entry.workerLabel === "scout-b").args.includes("--mode=plan"), true);
 
   const resultText = renderResult(config, repo, task.taskId, { verbose: true });
+  assert.match(resultText, /Review report:/);
   assert.match(resultText, /Scout notes:/);
   assert.match(resultText, /scout-a done/);
+  assert.match(resultText, /not a reviewer of record/);
+  assert.doesNotMatch(resultText, /No candidates have been collected/);
 });
 
 test("research workflow runs read-only workers without candidates or clean-checkout gating", async () => {
@@ -511,6 +520,7 @@ test("research workflow runs read-only workers without candidates or clean-check
   assert.match(resultText, /Research question: map config loading/);
   assert.match(resultText, /research pass A:/);
   assert.match(resultText, /Main agent guidance:/);
+  assert.doesNotMatch(resultText, /research-a progress/);
   assert.doesNotMatch(resultText, /Candidate:/);
   assert.doesNotMatch(resultText, /Apply:/);
   assert.doesNotMatch(renderStatus(config, repo, task.taskId), /Verify:/);
@@ -685,6 +695,21 @@ test("writeDefaultConfig --trust adds --trust to the Composer worker", () => {
   assert.equal("agents" in config, false);
   assert.equal("defaultRoles" in config.swarm, false);
   assert.deepEqual(config.workers.composer.args, ["--trust"]);
+});
+
+test("writeDefaultConfig infers a Swift verifier from Package.swift", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-swift-"));
+  fs.writeFileSync(path.join(dir, "Package.swift"), "// swift-tools-version: 6.0\n", "utf8");
+
+  assert.deepEqual(defaultVerifierForWorkspace(dir), {
+    kind: "shell",
+    command: "bash",
+    args: ["-lc", "swift test"]
+  });
+
+  const filePath = writeDefaultConfig(dir);
+  const config = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  assert.deepEqual(config.workers.verifier.args, ["-lc", "swift test"]);
 });
 
 test("resolveWorkspaceContext finds nested git repos when cwd is outside git", () => {

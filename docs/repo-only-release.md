@@ -132,7 +132,9 @@ Runtime config lives at `.composer-swarm/config.json` in the target project. See
 
 - `distribution.defaultWorkerModel` must stay `composer-2.5-fast`.
 - `workers.composer` configures the `cursor-agent` command used for Composer workers.
-- `verify` requires `workers.verifier`. The default config runs `npm test`.
+- `verify` requires `workers.verifier`. `setup --init` infers common defaults such as `swift test` for
+  `Package.swift`, `cargo test` for `Cargo.toml`, `go test ./...` for `go.mod`, `python -m pytest` for common
+  Python test configs, and `npm test` otherwise.
 - Read-only `research` and `review` snapshot current dirty/untracked checkouts into isolated worktrees.
   Implementation `team` and `apply` still require a clean checkout, aside from Composer Swarm runtime state.
 - Older `defaultRoles`, `agents[].role`, and `plan --roles` usage has been replaced by worker count flags:

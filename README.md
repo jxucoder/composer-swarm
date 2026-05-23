@@ -7,11 +7,11 @@ repository research, review, and implementation attempts to local Cursor/Compose
 `composer-2.5-fast`.
 
 The main agent keeps judgment and control. Composer workers provide breadth: wider code search, extra
-reasoning, review-only passes, and isolated candidate patches.
+reasoning, review-only leads, and isolated candidate patches.
 
 ## What You Get
 
-- `/composer:review` for read-only repo review, including dirty and untracked work
+- `/composer:review` for read-only repo review leads, including dirty and untracked work
 - `/composer:research` for read-only codebase research while the main agent keeps investigating
 - `/composer:team` for isolated implementation candidates when the checkout is clean
 - `/composer:status`, `/composer:inspect`, `/composer:logs`, and `/composer:result` to inspect local runs
@@ -25,6 +25,7 @@ reasoning, review-only passes, and isolated candidate patches.
 - authenticated `cursor-agent` on `PATH`
 - clean tracked files before `team` and `apply`
 - dirty or untracked files are supported for read-only `research` and `review`
+- `setup --init` infers a verifier for common repo types, such as `swift test` for `Package.swift`
 
 ## Install
 
@@ -113,7 +114,8 @@ composer-swarm result <task-id> --verbose
 ```
 
 Review is read-only. It snapshots tracked modifications and untracked files into isolated worker worktrees
-so Composer can inspect the code without changing the main checkout.
+so Composer can inspect the code without changing the main checkout. Treat the output as scout leads; the
+main agent should verify file references, severity, and behavior before calling anything release-blocking.
 
 ### Research A Code Path
 
@@ -127,6 +129,8 @@ composer-swarm result <task-id> --verbose
 ```
 
 The main agent should continue its own investigation and treat Composer output as leads to verify.
+Read-only workers run in Cursor plan mode, so test execution may be unavailable; use local checks for final
+behavioral claims.
 
 ### Try Implementation Candidates
 
@@ -146,6 +150,9 @@ After inspecting the candidate patch and verification output, apply exactly one 
 composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm cleanup <task-id>
 ```
+
+`cleanup` removes worker worktrees but keeps task metadata and transcripts under `.composer-swarm/state/` so
+`result`, `inspect`, and `logs` still work until you delete that state directory.
 
 ## Commands
 
@@ -169,7 +176,7 @@ Claude Code exposes the same workflow through `/composer:*` slash commands.
 ## Safety Model
 
 - Codex or Claude Code is the main agent; Composer is a delegate, not the decision-maker.
-- Research and review are read-only and have no apply path.
+- Research and review are read-only, have no apply path, and are not reviewers of record.
 - Dirty and untracked checkouts are snapshotted only for read-only research/review.
 - Implementation workers edit isolated git worktrees.
 - Cursor workers are pinned to `composer-2.5-fast`.
@@ -188,6 +195,17 @@ No. In repo-only v1, `--background` starts a detached local Node process and rec
 
 Yes. Use `research` or `review` with `--include-untracked` or `--snapshot-current`. Read-only workers get a
 snapshot of the current checkout, including untracked files where available.
+
+### Is review output authoritative?
+
+No. `review` and `research` are scout workflows. They broaden search and return evidence, confidence, and
+verification gaps. The main agent or user should validate important claims against source and local checks.
+
+### What verifier does setup create?
+
+`setup --init` writes a repo-specific verifier when it recognizes the project: `swift test` for
+`Package.swift`, `cargo test` for `Cargo.toml`, `go test ./...` for `go.mod`, `python -m pytest` for common
+Python test configs, and `npm test` otherwise.
 
 ### Can Composer Swarm implement from a dirty checkout?
 

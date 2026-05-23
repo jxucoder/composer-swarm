@@ -16,7 +16,8 @@ User
 ```
 
 The host agent owns planning judgment, result interpretation, final verification, and apply. Composer workers
-do not apply patches or own final decisions.
+do not apply patches or own final decisions. Read-only review and research output is scout signal, not a
+reviewer of record.
 
 ## Host Surfaces
 
@@ -81,7 +82,7 @@ There is no daemon, MCP server, hosted background service, or separate task UI i
 
 Workers are launched through `cursor-agent` and pinned to `composer-2.5-fast`.
 
-Read-only workers run in Cursor plan mode:
+Read-only workers run in Cursor plan mode and may not be able to execute shell/test commands:
 
 - `research-*`
 - `planner`
@@ -113,7 +114,8 @@ files into each read-only worker worktree.
 repository review and the common "review my current changes before I commit" workflow.
 
 Dirty or untracked checkouts are allowed and snapshotted into worker worktrees. Review workers are prompted
-to return structured findings with severity, file, issue, rationale, suggested fix, and evidence.
+to return structured findings with severity, file, issue, rationale, suggested fix, confidence, evidence, and
+verification gaps. The host agent must validate important findings against source and local checks.
 
 ### Team
 

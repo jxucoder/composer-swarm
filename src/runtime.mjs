@@ -39,7 +39,26 @@ export const REVIEW_PRESETS = {
   ].join(" ")
 };
 
-export function defaultConfig() {
+export function defaultVerifierForWorkspace(workspaceRoot = null) {
+  const hasFile = (fileName) => workspaceRoot && fs.existsSync(path.join(workspaceRoot, fileName));
+  let command = "npm test";
+  if (hasFile("Package.swift")) {
+    command = "swift test";
+  } else if (hasFile("Cargo.toml")) {
+    command = "cargo test";
+  } else if (hasFile("go.mod")) {
+    command = "go test ./...";
+  } else if (hasFile("pyproject.toml") || hasFile("pytest.ini")) {
+    command = "python -m pytest";
+  }
+  return {
+    kind: "shell",
+    command: "bash",
+    args: ["-lc", command]
+  };
+}
+
+export function defaultConfig(workspaceRoot = null) {
   return {
     version: 1,
     swarm: {
@@ -57,11 +76,7 @@ export function defaultConfig() {
         kind: "cursor-cli",
         command: "cursor-agent"
       },
-      verifier: {
-        kind: "shell",
-        command: "bash",
-        args: ["-lc", "npm test"]
-      }
+      verifier: defaultVerifierForWorkspace(workspaceRoot)
     }
   };
 }
@@ -101,7 +116,7 @@ export function writeDefaultConfig(cwd, options = {}) {
     throw new Error(`${filePath} already exists. Use --force to overwrite it.`);
   }
   fs.mkdirSync(dir, { recursive: true });
-  const config = defaultConfig();
+  const config = defaultConfig(workspaceRoot);
   if (options.trust) {
     config.workers.composer = {
       ...config.workers.composer,
@@ -116,9 +131,9 @@ export function loadConfig(cwd) {
   const workspaceRoot = findWorkspaceRoot(cwd);
   const filePath = configPath(workspaceRoot);
   if (!fs.existsSync(filePath)) {
-    return defaultConfig();
+    return defaultConfig(workspaceRoot);
   }
-  const base = defaultConfig();
+  const base = defaultConfig(workspaceRoot);
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
   const { policies: _unusedPolicies, ...parsedConfig } = parsed;
   const config = {
@@ -801,6 +816,13 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
   const candidateText = context.candidateText?.trim() || "No candidates are available yet.";
   const scoutText = context.scoutText?.trim() || "No scout notes are available yet.";
   const isResearch = Boolean(task.options?.research);
+  const isReadOnlyWorker =
+    workerLabel === "planner" ||
+    workerLabel === "reviewer" ||
+    workerLabel.startsWith("scout-") ||
+    workerLabel.startsWith("research-");
+  const readOnlyClaimRule =
+    "- Back every important claim with file paths, line numbers, commands, or reproducible evidence. If you cannot verify it, mark Confidence: low and explain the verification gap.";
   const base = [
     "You are a Composer worker launched by composer-swarm.",
     `Task id: ${task.taskId}`,
@@ -813,10 +835,17 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
     "",
     "Rules:",
     "- Work only in the workspace passed to cursor-agent.",
-    isResearch ? "- Do not edit files. Use plan/read-only mode for research only." : "- Keep changes narrowly scoped to the objective.",
+    isReadOnlyWorker
+      ? "- Do not edit files. You are intentionally running in Cursor plan/read-only mode for this worker, regardless of the host agent's mode."
+      : "- Keep changes narrowly scoped to the objective.",
     "- Prefer existing project patterns over new abstractions.",
-    isResearch ? "- Back every important claim with file paths, line numbers, commands, or reproducible evidence." : "- Report exact checks you ran and their results.",
-    isResearch ? "- Treat your output as leads for the host agent to verify, not as final authority." : "- End with a concise summary, changed files, risks, and follow-up notes."
+    isReadOnlyWorker ? readOnlyClaimRule : "- Report exact checks you ran and their results.",
+    isReadOnlyWorker
+      ? "- Treat your output as leads for the host agent to verify, not as final authority."
+      : "- End with a concise summary, changed files, risks, and follow-up notes.",
+    isReadOnlyWorker
+      ? "- Final answer only: do not include planning narration, status updates, internal reasoning, or tool-use commentary."
+      : null
   ].filter((line) => line !== null);
 
   if (workerLabel.startsWith("research-")) {
@@ -828,6 +857,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
       researchFocus(task.options?.focus),
       "Independently choose a useful search angle and avoid broad summaries.",
       "The host agent is also doing its own investigation in parallel; return evidence it can reconcile.",
+      "Do not attempt shell or test execution if plan mode rejects it; report that as a verification gap.",
       "",
       "Required output format:",
       "Research question: <repeat the question>",
@@ -895,12 +925,14 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
         "Repository review pass:",
         "Use the objective, planner context, and scout notes to review the repository.",
         "Do not edit files and do not expect candidate patches.",
+        "Do not attempt shell or test execution if plan mode rejects it; report that as a verification gap.",
         "Return findings in this exact structure:",
         "Severity: high|medium|low",
         "File: path:line",
         "Issue: <specific problem>",
         "Why it matters: <short rationale>",
         "Suggested fix: <concrete change>",
+        "Confidence: high|medium|low",
         "Evidence: <file path, line, command, or observation>",
         "Call out missing tests or verification gaps separately."
       ].join("\n");
@@ -930,7 +962,8 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
       "Scout pass:",
       "Do not edit files.",
       scoutFocus(),
-      "Report concrete findings using Severity, File, Issue, Why it matters, Suggested fix, and Evidence.",
+      "Do not attempt shell or test execution if plan mode rejects it; report that as a verification gap.",
+      "Report concrete findings using Severity, File, Issue, Why it matters, Suggested fix, Confidence, and Evidence.",
       "Prefer useful negative findings over broad summaries."
     ].join("\n");
   }
@@ -989,6 +1022,18 @@ function textFromJson(value) {
     return parts.length ? parts.join("") : null;
   }
   return null;
+}
+
+function isFinalOutputEvent(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const type = String(value.type ?? value.event ?? value.kind ?? "").toLowerCase();
+  return (
+    ["final", "result", "completed", "completion"].includes(type) ||
+    value.final === true ||
+    value.is_final === true
+  );
 }
 
 function trimForSummary(text) {
@@ -1093,6 +1138,7 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
     const stdoutState = { buffer: "" };
     const stderrState = { buffer: "" };
     const outputParts = [];
+    const finalOutputParts = [];
     let child;
     let settled = false;
     let attempts = 0;
@@ -1197,6 +1243,9 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
       const text = parsed ? textFromJson(parsed) : line;
       if (text) {
         outputParts.push(text);
+        if (parsed && isFinalOutputEvent(parsed)) {
+          finalOutputParts.push(text);
+        }
       }
       appendTranscript(transcript, {
         type: "worker-output",
@@ -1259,7 +1308,8 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
       }
       settled = true;
       clearWorkerTimers();
-      const finalOutput = cleanWorkerOutput(outputParts.join("\n"), prompt);
+      const finalSource = finalOutputParts.length ? finalOutputParts.join("\n") : outputParts.join("\n");
+      const finalOutput = cleanWorkerOutput(finalSource, prompt);
       const current = safeLoadTask(config, workspaceRoot, task.taskId);
       const cancelled = current?.status === "cancelled";
       if (cancelled) {
@@ -1516,6 +1566,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
         status: scout.status,
         transcript: scout.transcript,
         notes: scout.finalOutput || "(scout did not provide notes)",
+        error: scout.error ?? null,
         exitCode: scout.exitCode ?? null
       }));
       saveTask(config, workspaceRoot, task);
@@ -1551,6 +1602,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       status: reviewer.status,
       transcript: reviewer.transcript,
       notes: reviewer.finalOutput || "(reviewer did not provide notes)",
+      error: reviewer.error ?? null,
       exitCode: reviewer.exitCode ?? null
     };
     if (isCancelled(config, workspaceRoot, task.taskId)) {
@@ -1908,12 +1960,22 @@ export function formatTaskList(tasks) {
   }
   const lines = [`${pad("TASK", 22)} ${pad("STATUS", 17)} ${pad("OUTPUTS", 10)} OBJECTIVE`];
   for (const task of tasks) {
-    const outputCount = task.options?.research ? task.research?.length ?? 0 : task.candidates?.length ?? 0;
+    const outputCount = taskOutputCount(task);
     lines.push(
       `${pad(task.taskId, 22)} ${pad(task.status, 17)} ${pad(outputCount, 10)} ${task.objective}`
     );
   }
   return lines.join("\n");
+}
+
+function taskOutputCount(task) {
+  if (task.options?.research) {
+    return task.research?.length ?? 0;
+  }
+  if (task.options?.review) {
+    return (task.scouts?.length ?? 0) + (task.reviewer ? 1 : 0);
+  }
+  return task.candidates?.length ?? 0;
 }
 
 export function formatTaskStatus(task) {
@@ -2011,6 +2073,9 @@ export function formatResult(task, options = {}) {
   if (task.options?.research) {
     return formatResearchResult(task, { workspaceRoot, verbose });
   }
+  if (task.options?.review) {
+    return formatReviewResult(task, { workspaceRoot, verbose });
+  }
   const lines = [
     `Task: ${task.taskId}`,
     `Status: ${task.status}`,
@@ -2066,6 +2131,51 @@ export function formatResult(task, options = {}) {
   return lines.join("\n");
 }
 
+function formatReviewResult(task, options = {}) {
+  const workspaceRoot = options.workspaceRoot ?? task.workspaceRoot ?? process.cwd();
+  const verbose = Boolean(options.verbose);
+  const lines = [
+    `Task: ${task.taskId}`,
+    `Status: ${task.status}`,
+    `Review objective: ${task.objective}`,
+    "",
+    "Review report:"
+  ];
+  if (task.reviewer?.error) {
+    lines.push(`Reviewer error: ${task.reviewer.error}`);
+  }
+  lines.push(task.reviewer?.notes ?? "No reviewer notes recorded yet.");
+  if (verbose) {
+    lines.push("", "Scout notes:");
+    if (!task.scouts?.length) {
+      lines.push("- none");
+    } else {
+      for (const scout of task.scouts) {
+        lines.push("");
+        lines.push(`Scout: ${workerLabelFor(scout) ?? "unknown"}`);
+        lines.push(`Status: ${scout.status}`);
+        if (scout.transcript) {
+          lines.push(`Transcript: ${relativePath(workspaceRoot, scout.transcript)}`);
+        }
+        lines.push(scout.notes ?? "No scout notes recorded.");
+      }
+    }
+  } else if (task.scouts?.length) {
+    lines.push("", `(use --verbose for ${task.scouts.length} scout note${task.scouts.length === 1 ? "" : "s"})`);
+  }
+  lines.push("");
+  lines.push("Main agent guidance:");
+  lines.push("- Treat this as scout output, not a reviewer of record.");
+  lines.push("- Verify high and medium severity claims against source before acting.");
+  lines.push("- Run local repo checks yourself when behavior matters; read-only workers may not execute tests.");
+  lines.push("");
+  lines.push("Next steps:");
+  for (const hint of taskGuidance(task)) {
+    lines.push(`- ${hint}`);
+  }
+  return lines.join("\n");
+}
+
 function formatResearchResult(task, options = {}) {
   const workspaceRoot = options.workspaceRoot ?? task.workspaceRoot ?? process.cwd();
   const verbose = Boolean(options.verbose);
@@ -2096,7 +2206,7 @@ function formatResearchResult(task, options = {}) {
   lines.push("");
   lines.push("Main agent guidance:");
   lines.push("- Continue or complete your own repo investigation.");
-  lines.push("- Treat Composer findings as evidence-backed leads, not authority.");
+  lines.push("- Treat Composer findings as scout output, not authority or a reviewer of record.");
   lines.push("- Cross-check important claims against the cited files or commands before acting.");
   lines.push("");
   lines.push("Next steps:");
@@ -2432,11 +2542,15 @@ export function cleanupTask(config, workspaceRoot, taskId) {
   }
   task.cleanedAt = new Date().toISOString();
   saveTask(config, workspaceRoot, task);
-  return {
-    task,
-    lines: [`Cleaned ${taskId}.`, removed.length ? `Removed worktrees:\n${removed.map((entry) => `- ${entry}`).join("\n")}` : "No worktrees needed removal."]
-  };
-}
+	  return {
+	    task,
+	    lines: [
+	      `Cleaned ${taskId}.`,
+	      removed.length ? `Removed worktrees:\n${removed.map((entry) => `- ${entry}`).join("\n")}` : "No worktrees needed removal.",
+	      `Retained task metadata and transcripts under ${relativePath(workspaceRoot, stateRoot(config, workspaceRoot))}.`
+	    ]
+	  };
+	}
 
 export function cleanupTasks(config, workspaceRoot, taskId = null) {
   if (taskId) {

@@ -1,5 +1,5 @@
 ---
-description: Show research output, candidate comparison, reviewer notes, and next steps for a Composer Swarm task
+description: Show scout output, candidate comparison, reviewer notes, and next steps for a Composer Swarm task
 argument-hint: '[task-id] [--verbose]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)
@@ -8,4 +8,4 @@ allowed-tools: Bash(node:*)
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" result "$ARGUMENTS"`
 
 Present the command output directly. Do not summarize or condense it.
-Preserve task IDs, research findings, candidate IDs, recommendation hints, patch paths, worktree paths, verifier checks, baseline versus candidate-specific failures, apply warnings, reviewer notes, and next steps.
+Preserve task IDs, research/review findings, candidate IDs, recommendation hints, patch paths, worktree paths, verifier checks, baseline versus candidate-specific failures, apply warnings, reviewer notes, validation guidance, and next steps.

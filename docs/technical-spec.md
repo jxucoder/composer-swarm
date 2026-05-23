@@ -69,7 +69,8 @@ Top-level fields:
 - `distribution.defaultWorkerModel` must be `composer-2.5-fast`. Other values fail `doctor` and are rejected
   when launching workers.
 - `workers.composer.command` must resolve to an available `cursor-agent` command.
-- `verify` requires `workers.verifier` when that command is run. The default config includes one.
+- `verify` requires `workers.verifier` when that command is run. `setup --init` writes a best-effort
+  repo-specific verifier for common manifests, such as `swift test` for `Package.swift`.
 
 **Informational only:**
 
@@ -102,10 +103,12 @@ worker outputs are still recorded so the host agent can use the partial evidence
 
 Default implementation work uses one planning pass, one to four isolated implementation attempts, and one
 review pass. Review-only work uses one planning pass, optional read-only scout passes, and one review pass.
-These worker labels are runtime state, not user-configured personas.
+Treat review-only output as scout signal for the host agent to validate, not as a reviewer of record. These
+worker labels are runtime state, not user-configured personas.
 
-Planning, research, scout, and review passes run in Cursor plan mode. Implementation workers run with edit
-access inside isolated git worktrees only.
+Planning, research, scout, and review passes run in Cursor plan mode. They may not be able to execute shell
+checks, so behavioral claims must be verified by the host or by configured verifier commands where applicable.
+Implementation workers run with edit access inside isolated git worktrees only.
 
 Workers have a conservative inactivity timeout so a silent `cursor-agent` process cannot block a task
 indefinitely. Timed-out workers are marked failed with the timeout reason in task status and transcripts.
@@ -210,16 +213,18 @@ composer-swarm review --preset repo --include-untracked
 Review tasks run a read-only review workflow with optional scout passes. They do not create implementation
 patches. Dirty and untracked checkouts are supported by snapshotting current files into read-only worker
 worktrees. This supports the common "review my current changes before I commit" workflow without weakening
-the clean-checkout requirement for implementation and apply.
+the clean-checkout requirement for implementation and apply. Workers are prompted to return severity,
+file:line, issue, rationale, suggested fix, confidence, evidence, and verification gaps.
 
 ## Results
 
-`result` shows candidate IDs, changed-file counts, patch size, verifier status, reviewer notes, and the
-detected recommendation when one can be parsed. Use `--verbose` for patch paths, worktree paths, and failed
-check output.
+For implementation tasks, `result` shows candidate IDs, changed-file counts, patch size, verifier status,
+reviewer notes, and the detected recommendation when one can be parsed. Use `--verbose` for patch paths,
+worktree paths, and failed check output.
 
-For research tasks, `result --verbose` shows each research worker's evidence and transcript path. It never
-prints apply commands.
+For review and research tasks, `result` prints the workers' final reports and guidance to verify important
+claims locally. `--verbose` adds scout/research transcript paths and worker notes. It never prints apply
+commands for read-only tasks.
 
 ## Inspect And Logs
 
@@ -243,11 +248,14 @@ composer-swarm logs <task-id> --worker builder-a --tail 80
 ```
 
 Use `--tail 0` to print the full transcript. These commands are the local substitute for a hosted background
-task UI in repo-only v1.
+task UI in repo-only v1. `cleanup` removes worker worktrees but leaves task metadata and transcripts so
+`result`, `inspect`, and `logs` remain useful until `.composer-swarm/state/` is deleted.
 
 ## Verification
 
-`verify` runs configured shell checks, defaulting to `npm test`, against candidate worktrees:
+`verify` runs configured shell checks against candidate worktrees. `setup --init` infers common defaults:
+`swift test` for Swift packages, `cargo test` for Rust, `go test ./...` for Go, `python -m pytest` for common
+Python test configs, and `npm test` otherwise.
 
 ```bash
 composer-swarm verify <task-id>

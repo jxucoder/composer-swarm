@@ -16,6 +16,8 @@ Core constraints:
 - Composer workers use Cursor model `composer-2.5-fast` only.
 - Do not fix issues, apply patches, or suggest that you are about to make changes.
 - The task is read-only; optional scout passes add broader search, and no implementation patches are created.
+- Treat review output as scout signal, not a reviewer of record. The main agent must validate important claims.
+- Workers run in read-only plan mode; if shell/test execution is unavailable, treat that as a verification gap.
 - Return the runtime output directly after launch or completion.
 
 Execution mode rules:

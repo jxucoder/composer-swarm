@@ -15,8 +15,9 @@ Core constraints:
 - Dirty and untracked checkouts are allowed. The runtime snapshots current changes into read-only worker worktrees when needed.
 - Composer workers use Cursor model `composer-2.5-fast` only.
 - Do not fix issues, create patches, verify candidates, or apply anything from this command.
-- Composer output is evidence and leads for the main agent; it is not authority.
+- Composer output is evidence and scout leads for the main agent; it is not authority or a reviewer of record.
 - The main agent should continue its own repo investigation and cross-check important Composer findings.
+- Workers run in read-only plan mode; if shell/test execution is unavailable, treat that as a verification gap.
 - Return the runtime output directly after launch or completion.
 
 Execution mode rules:

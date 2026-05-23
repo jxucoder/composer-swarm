@@ -126,9 +126,9 @@ It records:
 - base commit and branch
 - mode options
 - worker states
-- research outputs
-- scout notes
-- reviewer notes
+- research outputs, stored from the worker's final report when the stream marks one
+- scout notes, stored from final reports when available
+- reviewer notes, stored from final reports when available
 - candidates
 - selected candidate after apply
 

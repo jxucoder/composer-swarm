@@ -72,9 +72,11 @@ Codex environments that support local skills or plugins should get a skill with 
   `composer-swarm research "<question>" --workers <1-4> --background` as a detached local run
 - for "review my current changes" requests, use read-only review with snapshotting:
   `composer-swarm review --preset repo --include-untracked`
-- treat research output as evidence-backed leads and cross-check important claims
+- treat research/review output as evidence-backed scout leads and cross-check important claims
 - use `composer-swarm team "<task>"` to launch Composer workers
 - keep Composer workers on Cursor model `composer-2.5-fast`
+- check `.composer-swarm/config.json` after setup when verification matters; setup infers common verifiers such
+  as `swift test` for Swift packages
 - inspect candidate summaries and patches
 - use `composer-swarm inspect` and `composer-swarm logs` when detached local runs need local-state detail
 - run `composer-swarm verify` before recommending a candidate
