@@ -34,7 +34,7 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    composer-swarm setup --init --trust
    ```
 
-   After initialization, check `.composer-swarm/config.json` if verification matters. The runtime infers common verifiers, including `swift test` for Swift packages, but Codex should correct `workers.verifier` if the repo needs a different command.
+   After initialization, check `.composer-swarm/config.json` if verification matters. The runtime does not infer test commands. Codex should inspect the repo and set `workers.verifier` only when it knows the right project-specific check.
 
 2. For broad, uncertain, or high-impact repo understanding, start your own normal investigation first. Then launch Composer Swarm research as a detached local run and keep researching locally while it runs.
 

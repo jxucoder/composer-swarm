@@ -69,8 +69,8 @@ Top-level fields:
 - `distribution.defaultWorkerModel` must be `composer-2.5-fast`. Other values fail `doctor` and are rejected
   when launching workers.
 - `workers.composer.command` must resolve to an available `cursor-agent` command.
-- `verify` requires `workers.verifier` when that command is run. `setup --init` writes a best-effort
-  repo-specific verifier for common manifests, such as `swift test` for `Package.swift`.
+- `verify` requires `workers.verifier` when that command is run. `setup --init` does not infer this command;
+  the host agent or user must choose the project-specific check.
 
 **Informational only:**
 
@@ -140,7 +140,8 @@ composer-swarm cleanup [task-id]
 hosted Codex task, or managed task UI.
 
 `setup` checks git, config, Node, the configured Composer worker command, and the configured shell verifier
-command. `setup --init --trust` writes `.composer-swarm/config.json` with trusted Composer worker args.
+command when one is present. `setup --init --trust` writes `.composer-swarm/config.json` with trusted Composer
+worker args and no verifier guess.
 
 Dirty-check behavior is mode-specific:
 
@@ -253,9 +254,9 @@ task UI in repo-only v1. `cleanup` removes worker worktrees but leaves task meta
 
 ## Verification
 
-`verify` runs configured shell checks against candidate worktrees. `setup --init` infers common defaults:
-`swift test` for Swift packages, `cargo test` for Rust, `go test ./...` for Go, `python -m pytest` for common
-Python test configs, and `npm test` otherwise.
+`verify` runs configured shell checks against candidate worktrees. Composer Swarm does not guess this command.
+The host agent should inspect the repository and add `workers.verifier` to `.composer-swarm/config.json` when
+verification is needed.
 
 ```bash
 composer-swarm verify <task-id>

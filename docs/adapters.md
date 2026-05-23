@@ -10,18 +10,13 @@ An adapter maps a swarm task to a concrete execution method. The user config sta
 ```json
 {
   "workers": {
-    "composer": {
-      "kind": "cursor-cli",
-      "command": "cursor-agent",
-      "args": ["--trust"]
-    },
-    "verifier": {
-      "kind": "shell",
-      "command": "bash",
-      "args": ["-lc", "npm test"]
-    }
-  }
-}
+	    "composer": {
+	      "kind": "cursor-cli",
+	      "command": "cursor-agent",
+	      "args": ["--trust"]
+	    }
+	  }
+	}
 ```
 
 Adapters should stay small. The swarm runtime owns task state; adapters only translate task envelopes into
@@ -75,8 +70,7 @@ Codex environments that support local skills or plugins should get a skill with 
 - treat research/review output as evidence-backed scout leads and cross-check important claims
 - use `composer-swarm team "<task>"` to launch Composer workers
 - keep Composer workers on Cursor model `composer-2.5-fast`
-- check `.composer-swarm/config.json` after setup when verification matters; setup infers common verifiers such
-  as `swift test` for Swift packages
+- inspect the repo and configure `workers.verifier` only when the right project-specific check command is known
 - inspect candidate summaries and patches
 - use `composer-swarm inspect` and `composer-swarm logs` when detached local runs need local-state detail
 - run `composer-swarm verify` before recommending a candidate
@@ -118,7 +112,7 @@ The generic shell adapter is the compatibility escape hatch for deterministic ch
 {
   "kind": "shell",
   "command": "bash",
-  "args": ["-lc", "npm test"]
+  "args": ["-lc", "<repo-check-command>"]
 }
 ```
 

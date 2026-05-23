@@ -15,11 +15,6 @@
       "kind": "cursor-cli",
       "command": "cursor-agent",
       "args": ["--trust"]
-    },
-    "verifier": {
-      "kind": "shell",
-      "command": "bash",
-      "args": ["-lc", "npm test"]
     }
   }
 }

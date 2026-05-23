@@ -25,7 +25,7 @@ reasoning, review-only leads, and isolated candidate patches.
 - authenticated `cursor-agent` on `PATH`
 - clean tracked files before `team` and `apply`
 - dirty or untracked files are supported for read-only `research` and `review`
-- `setup --init` infers a verifier for common repo types, such as `swift test` for `Package.swift`
+- `verify` needs a repo-specific `workers.verifier`; the host agent should choose it when needed
 
 ## Install
 
@@ -203,9 +203,8 @@ verification gaps. The main agent or user should validate important claims again
 
 ### What verifier does setup create?
 
-`setup --init` writes a repo-specific verifier when it recognizes the project: `swift test` for
-`Package.swift`, `cargo test` for `Cargo.toml`, `go test ./...` for `go.mod`, `python -m pytest` for common
-Python test configs, and `npm test` otherwise.
+None. `setup --init` does not guess test commands. The main agent should inspect the repo and add
+`workers.verifier` to `.composer-swarm/config.json` only when it knows the right command.
 
 ### Can Composer Swarm implement from a dirty checkout?
 

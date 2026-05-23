@@ -485,8 +485,7 @@ async function main() {
   }
 
   if (command === "example-config") {
-    const ctx = resolveWorkspaceContext(cwd, { requireGit: false });
-    console.log(JSON.stringify(defaultConfig(ctx.gitRoot ?? ctx.workspaceRoot), null, 2));
+    console.log(JSON.stringify(defaultConfig(), null, 2));
     return;
   }
 

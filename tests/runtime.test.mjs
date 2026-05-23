@@ -15,7 +15,6 @@ import {
   createTeamTask,
   DEFAULT_CURSOR_MODEL,
   defaultConfig,
-  defaultVerifierForWorkspace,
   extractRecommendedCandidate,
   findNestedGitRepos,
   formatCandidateComparison,
@@ -216,7 +215,7 @@ test("doctor reports configured workers", () => {
   assert.equal(report.ok, true);
   assert.match(report.lines.join("\n"), /Workers:/);
   assert.match(report.lines.join("\n"), /composer: ok/);
-  assert.match(report.lines.join("\n"), /verifier: ok/);
+  assert.match(report.lines.join("\n"), /verifier: not configured/);
 });
 
 test("legacy agent configs still load without exposing default worker catalogs", () => {
@@ -697,19 +696,13 @@ test("writeDefaultConfig --trust adds --trust to the Composer worker", () => {
   assert.deepEqual(config.workers.composer.args, ["--trust"]);
 });
 
-test("writeDefaultConfig infers a Swift verifier from Package.swift", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-swift-"));
+test("writeDefaultConfig leaves verifier unset for the host agent to choose", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-no-verifier-"));
   fs.writeFileSync(path.join(dir, "Package.swift"), "// swift-tools-version: 6.0\n", "utf8");
-
-  assert.deepEqual(defaultVerifierForWorkspace(dir), {
-    kind: "shell",
-    command: "bash",
-    args: ["-lc", "swift test"]
-  });
 
   const filePath = writeDefaultConfig(dir);
   const config = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  assert.deepEqual(config.workers.verifier.args, ["-lc", "swift test"]);
+  assert.equal("verifier" in config.workers, false);
 });
 
 test("resolveWorkspaceContext finds nested git repos when cwd is outside git", () => {

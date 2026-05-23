@@ -172,6 +172,7 @@ test("release packaging excludes local generated state and reference checkouts",
   }
   const exampleConfig = JSON.parse(read("swarm.config.example.json"));
   assert.equal(exampleConfig.distribution.defaultWorkerModel, "composer-2.5-fast");
+  assert.equal("verifier" in exampleConfig.workers, false);
   assert.equal("policies" in exampleConfig, false);
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")), "GitHub CI workflow should exist");
   assert.ok(
@@ -352,6 +353,7 @@ test("setup can initialize trusted config from the friendly entrypoint", () => {
   assert.equal("agents" in config, false);
   assert.equal("defaultRoles" in config.swarm, false);
   assert.deepEqual(config.workers.composer.args, ["--trust"]);
+  assert.equal("verifier" in config.workers, false);
 });
 
 test("plugin script forwards a single raw argument string to the CLI", () => {

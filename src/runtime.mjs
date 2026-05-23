@@ -39,26 +39,7 @@ export const REVIEW_PRESETS = {
   ].join(" ")
 };
 
-export function defaultVerifierForWorkspace(workspaceRoot = null) {
-  const hasFile = (fileName) => workspaceRoot && fs.existsSync(path.join(workspaceRoot, fileName));
-  let command = "npm test";
-  if (hasFile("Package.swift")) {
-    command = "swift test";
-  } else if (hasFile("Cargo.toml")) {
-    command = "cargo test";
-  } else if (hasFile("go.mod")) {
-    command = "go test ./...";
-  } else if (hasFile("pyproject.toml") || hasFile("pytest.ini")) {
-    command = "python -m pytest";
-  }
-  return {
-    kind: "shell",
-    command: "bash",
-    args: ["-lc", command]
-  };
-}
-
-export function defaultConfig(workspaceRoot = null) {
+export function defaultConfig() {
   return {
     version: 1,
     swarm: {
@@ -75,8 +56,7 @@ export function defaultConfig(workspaceRoot = null) {
       composer: {
         kind: "cursor-cli",
         command: "cursor-agent"
-      },
-      verifier: defaultVerifierForWorkspace(workspaceRoot)
+      }
     }
   };
 }
@@ -116,7 +96,7 @@ export function writeDefaultConfig(cwd, options = {}) {
     throw new Error(`${filePath} already exists. Use --force to overwrite it.`);
   }
   fs.mkdirSync(dir, { recursive: true });
-  const config = defaultConfig(workspaceRoot);
+  const config = defaultConfig();
   if (options.trust) {
     config.workers.composer = {
       ...config.workers.composer,
@@ -131,9 +111,9 @@ export function loadConfig(cwd) {
   const workspaceRoot = findWorkspaceRoot(cwd);
   const filePath = configPath(workspaceRoot);
   if (!fs.existsSync(filePath)) {
-    return defaultConfig(workspaceRoot);
+    return defaultConfig();
   }
-  const base = defaultConfig(workspaceRoot);
+  const base = defaultConfig();
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
   const { policies: _unusedPolicies, ...parsedConfig } = parsed;
   const config = {
