@@ -10,6 +10,7 @@ const DEFAULT_STATE_DIR = ".composer-swarm/state";
 const TASK_SCHEMA = "composer-swarm.task.v1";
 const CANDIDATE_SCHEMA = "composer-swarm.candidate.v1";
 const BUILDER_SUFFIXES = ["a", "b", "c", "d"];
+export const DEFAULT_CURSOR_MODEL = "composer-2.5-fast";
 
 export const REVIEW_PRESETS = {
   repo: [
@@ -44,7 +45,8 @@ export function defaultConfig() {
     distribution: {
       userPromise: "Add a team of Composer workers to the coding agent you already use.",
       primaryHosts: ["claude-code", "codex"],
-      defaultWorkerKind: "cursor-cli"
+      defaultWorkerKind: "cursor-cli",
+      defaultWorkerModel: DEFAULT_CURSOR_MODEL
     },
     agents: [
       {
@@ -205,6 +207,13 @@ export function runDoctor(config) {
   if (config.distribution?.userPromise) {
     lines.push(`Promise: ${config.distribution.userPromise}`);
   }
+  const configuredModel = config.distribution?.defaultWorkerModel ?? DEFAULT_CURSOR_MODEL;
+  if (configuredModel === DEFAULT_CURSOR_MODEL) {
+    lines.push(`Cursor model: ${DEFAULT_CURSOR_MODEL}`);
+  } else {
+    ok = false;
+    lines.push(`Cursor model: unsupported ${configuredModel}; expected ${DEFAULT_CURSOR_MODEL}`);
+  }
   lines.push(`Node: ${process.version}`);
 
   const gitAvailable = commandAvailable("git");
@@ -246,6 +255,17 @@ function fallbackCursorAgent(role) {
     command: "cursor-agent",
     canEdit: role.startsWith("builder-")
   };
+}
+
+export function resolveCursorModel(config, requestedModel = null) {
+  const configuredModel = config.distribution?.defaultWorkerModel ?? DEFAULT_CURSOR_MODEL;
+  if (configuredModel !== DEFAULT_CURSOR_MODEL) {
+    throw new Error(`Composer Swarm only supports Cursor model ${DEFAULT_CURSOR_MODEL}. Config requested ${configuredModel}.`);
+  }
+  if (requestedModel && requestedModel !== DEFAULT_CURSOR_MODEL) {
+    throw new Error(`Composer Swarm only supports --model ${DEFAULT_CURSOR_MODEL}. Received --model ${requestedModel}.`);
+  }
+  return DEFAULT_CURSOR_MODEL;
 }
 
 export function planTask(config, taskText, options = {}) {
@@ -518,6 +538,7 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   if (!options.review && builderCount < 1) {
     throw new Error("composer-swarm team requires 1 to 4 builders.");
   }
+  const model = resolveCursorModel(config, options.model ?? null);
   const roles = executionRoles(options);
   const task = {
     schema: TASK_SCHEMA,
@@ -533,7 +554,7 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
     updatedAt: createdAt,
     options: {
       builders: options.review ? 0 : builderCount,
-      model: options.model ?? null,
+      model,
       background: Boolean(options.background),
       review: Boolean(options.review)
     },

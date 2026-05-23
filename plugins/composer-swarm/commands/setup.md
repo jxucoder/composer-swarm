@@ -17,7 +17,7 @@ If the JSON says `configExists` is false:
 - Use `AskUserQuestion` exactly once to ask whether to initialize this repository.
 - Put the init option first and suffix it with `(Recommended)`.
 - Use these two options:
-  - `Initialize with trust (Recommended)`
+  - `Initialize with trust`
   - `Show setup report only`
 - If the user chooses init, run:
 
@@ -25,11 +25,7 @@ If the JSON says `configExists` is false:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" setup --init --trust "$ARGUMENTS"
 ```
 
-- If the user skips init, run:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" setup "$ARGUMENTS"
-```
+- If the user skips init, present the setup report from the first command without rerunning it.
 
 If config already exists:
 - Run:

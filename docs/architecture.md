@@ -44,6 +44,7 @@ Claude Code:
 /composer:team
 /composer:status
 /composer:result
+/composer:verify
 /composer:cancel
 ```
 
@@ -60,11 +61,13 @@ The core runtime is a repo-aware CLI and optional daemon:
 ```text
 composer-swarm
   init
+  setup
   doctor
   plan
   team
   status
   result
+  verify
   apply
   cancel
   cleanup
@@ -88,7 +91,8 @@ reliable from existing hosts.
 
 ### 3. Composer Worker Pool
 
-Composer workers are launched through `cursor-agent` or a compatible Cursor/Composer CLI.
+Composer workers are launched through `cursor-agent` or a compatible Cursor/Composer CLI and pinned to
+Cursor model `composer-2.5-fast`.
 
 Default roles:
 
@@ -205,7 +209,7 @@ If two agents need the same paths, the coordinator should serialize them or spli
 ## Recommended MVP
 
 1. Ship `composer-swarm` as a repo-only CLI that can create worktrees and launch `cursor-agent`.
-2. Ship a local Claude Code plugin with `/composer:setup`, `/composer:team`, `/composer:status`, `/composer:result`, `/composer:apply`, and `/composer:cancel`.
-3. Ship a Codex skill that calls the same CLI and asks before applying patches.
+2. Ship a local Claude Code plugin with `/composer:setup`, `/composer:team`, `/composer:review`, `/composer:status`, `/composer:result`, `/composer:verify`, `/composer:apply`, and `/composer:cancel`.
+3. Ship a Codex plugin/skill that calls the same CLI and asks before applying patches.
 4. List candidate patches, summaries, changed files, checks, and reviewer notes.
 5. Defer MCP until the CLI worker loop is stable.

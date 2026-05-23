@@ -9,4 +9,5 @@ allowed-tools: Bash(node:*)
 
 Apply only the candidate explicitly requested by the slash-command arguments.
 `--recommended` is allowed only when the user intentionally invoked this apply command with that flag.
+Require a clean tracked git checkout before apply; do not run apply unless the user explicitly invoked this command.
 Return the command output directly. Do not reinterpret it.

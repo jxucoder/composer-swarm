@@ -12,6 +12,7 @@ import {
   cleanupTask,
   createReviewTask,
   createTeamTask,
+  DEFAULT_CURSOR_MODEL,
   defaultConfig,
   extractRecommendedCandidate,
   findNestedGitRepos,
@@ -22,6 +23,7 @@ import {
   renderResult,
   renderStatus,
   resolveWorkspaceContext,
+  resolveCursorModel,
   reviewObjective,
   runDoctor,
   runTaskWorkflow,
@@ -138,6 +140,19 @@ test("cursor-agent args use stream-json, workspace, model, and plan mode for non
 
   const builderArgs = buildCursorAgentArgs({ role: "builder-a", worktree: "/tmp/w", prompt: "build" });
   assert.equal(builderArgs.includes("--mode=plan"), false);
+});
+
+test("Composer workers are pinned to Composer 2.5 Fast", () => {
+  const config = defaultConfig();
+  assert.equal(config.distribution.defaultWorkerModel, DEFAULT_CURSOR_MODEL);
+  assert.equal(resolveCursorModel(config), DEFAULT_CURSOR_MODEL);
+  assert.equal(resolveCursorModel(config, DEFAULT_CURSOR_MODEL), DEFAULT_CURSOR_MODEL);
+  assert.throws(() => resolveCursorModel(config, "auto"), /composer-2\.5-fast/);
+
+  const repo = makeRepo();
+  const task = createTeamTask(config, repo, "pin model", { taskId: "task_model" });
+  assert.equal(task.options.model, DEFAULT_CURSOR_MODEL);
+  assert.throws(() => createTeamTask(config, repo, "wrong model", { model: "auto" }), /composer-2\.5-fast/);
 });
 
 test("role prompts include objective, role, planner output, and candidate context", () => {

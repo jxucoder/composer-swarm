@@ -1,6 +1,6 @@
 ---
 description: Launch a planner and reviewer for a preset repository review
-argument-hint: '[--preset repo|security|tests] [--background|--wait] [--model <model>]'
+argument-hint: '[--preset repo|security|tests] [--background|--wait]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -12,6 +12,7 @@ Raw slash-command arguments:
 
 Core constraints:
 - This command is review-only.
+- Composer workers use Cursor model `composer-2.5-fast` only.
 - Do not fix issues, apply patches, or suggest that you are about to make changes.
 - The task uses planner + reviewer workers only; no builder patches are created.
 - Return the runtime output directly after launch or completion.
@@ -26,21 +27,25 @@ Execution mode rules:
   - `Run in background`
   - `Wait for results`
 
-Foreground flow:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS --wait"
-```
-
-Background flow:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS --background"
-```
-
-If the user already supplied `--wait` or `--background`, preserve the arguments exactly:
+When the user already supplied `--wait` or `--background`, preserve the arguments exactly:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS"
 ```
+
+Otherwise append the chosen mode as a separate CLI flag after the raw arguments.
+
+Foreground flow:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS" --wait
+```
+
+Background flow:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS" --background
+```
+
+Composer Swarm uses CLI `--background` to spawn a detached Node runner and record its PID. This keeps background reviews observable through `/composer:status` and `/composer:result` without relying on host-specific background Bash APIs.
 
 Output rules:
 - Present stdout and stderr without summarizing or rewriting.

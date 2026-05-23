@@ -12,6 +12,7 @@ Use this skill when the user asks Codex to delegate implementation or review wor
 - Prefer `composer-swarm` when it is on `PATH`.
 - Otherwise run `node <composer-swarm-repo>/bin/composer-swarm.mjs ...`.
 - Run commands from the target repository.
+- Composer workers must use Cursor model `composer-2.5-fast` only.
 - Composer workers edit isolated git worktrees; the Codex host supervises and chooses.
 
 ## Default Flow

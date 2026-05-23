@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -12,8 +13,20 @@ const repoRoot = process.env.COMPOSER_SWARM_REPO
   ? path.resolve(process.env.COMPOSER_SWARM_REPO)
   : path.resolve(pluginRoot, "../..");
 const cliPath = path.join(repoRoot, "bin", "composer-swarm.mjs");
+const argsPath = path.join(repoRoot, "src", "args.mjs");
 
-const [command, ...args] = process.argv.slice(2);
+if (!fs.existsSync(cliPath) || !fs.existsSync(argsPath)) {
+  process.stderr.write(
+    `composer-swarm plugin could not find the repo runtime at ${repoRoot}.\n` +
+      "If the plugin was copied outside the checkout, set COMPOSER_SWARM_REPO=/path/to/composer-swarm.\n"
+  );
+  process.exit(1);
+}
+
+const { normalizePluginArgv } = await import(pathToFileURL(argsPath).href);
+
+const [command, ...rawArgs] = process.argv.slice(2);
+const args = normalizePluginArgv(rawArgs);
 const result = spawnSync(process.execPath, [cliPath, command, ...args], {
   cwd: process.cwd(),
   encoding: "utf8",

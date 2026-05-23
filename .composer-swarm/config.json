@@ -17,7 +17,8 @@
       "claude-code",
       "codex"
     ],
-    "defaultWorkerKind": "cursor-cli"
+    "defaultWorkerKind": "cursor-cli",
+    "defaultWorkerModel": "composer-2.5-fast"
   },
   "agents": [
     {

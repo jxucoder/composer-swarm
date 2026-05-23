@@ -5,6 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
+import { normalizeArgs, splitRawArgumentString } from "../src/args.mjs";
 import {
   applyCandidate,
   builderRoles,
@@ -28,6 +29,8 @@ import {
   writeDefaultConfig
 } from "../src/runtime.mjs";
 
+export { splitRawArgumentString };
+
 function usage() {
   return `composer-swarm
 
@@ -37,8 +40,8 @@ Usage:
   composer-swarm doctor
   composer-swarm agents
   composer-swarm plan <task text> [--roles a,b,c]
-  composer-swarm team <task text> [--builders 2] [--background|--wait] [--model <model>]
-  composer-swarm review [--preset repo|security|tests] [--background|--wait] [--model <model>]
+  composer-swarm team <task text> [--builders 2] [--background|--wait]
+  composer-swarm review [--preset repo|security|tests] [--background|--wait]
   composer-swarm status [task-id]
   composer-swarm result [task-id] [--verbose]
   composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
@@ -48,69 +51,7 @@ Usage:
   composer-swarm cleanup [task-id]
   composer-swarm config
 
-Repo-only v1 launches local cursor-agent workers in isolated git worktrees and stores state under .composer-swarm/state/.`;
-}
-
-export function splitRawArgumentString(raw) {
-  const tokens = [];
-  let current = "";
-  let quote = null;
-  let escaping = false;
-
-  for (const character of String(raw ?? "")) {
-    if (escaping) {
-      current += character;
-      escaping = false;
-      continue;
-    }
-    if (character === "\\") {
-      escaping = true;
-      continue;
-    }
-    if (quote) {
-      if (character === quote) {
-        quote = null;
-      } else {
-        current += character;
-      }
-      continue;
-    }
-    if (character === "'" || character === "\"") {
-      quote = character;
-      continue;
-    }
-    if (/\s/.test(character)) {
-      if (current) {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += character;
-  }
-
-  if (escaping) {
-    current += "\\";
-  }
-  if (current) {
-    tokens.push(current);
-  }
-  return tokens;
-}
-
-function normalizeArgs(args) {
-  const normalized = [];
-  for (const raw of args) {
-    if (!raw || !raw.trim()) {
-      continue;
-    }
-    if (/\s/.test(raw)) {
-      normalized.push(...splitRawArgumentString(raw));
-    } else {
-      normalized.push(raw);
-    }
-  }
-  return normalized;
+Repo-only v1 launches local cursor-agent workers in isolated git worktrees, pins them to composer-2.5-fast, and stores state under .composer-swarm/state/.`;
 }
 
 function parseArgs(rawArgs, optionNames = []) {

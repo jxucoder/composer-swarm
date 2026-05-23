@@ -9,3 +9,4 @@ allowed-tools: Bash(node:*)
 
 If the user did not pass a task ID, present the compact task table directly.
 If the user passed a task ID, present the full status output directly.
+Preserve task IDs, worker states, background PID hints, elapsed timing, and next-step commands.

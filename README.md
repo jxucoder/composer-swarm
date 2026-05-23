@@ -3,12 +3,12 @@
 Composer Swarm gives an existing Claude Code or Codex user a local team of Cursor/Composer workers.
 
 Repo-only v1 is a dependency-free Node CLI. Users clone this repo, run `bin/composer-swarm.mjs`, and can
-optionally install the local Claude Code commands or Codex skill from the repo. There is no npm package or
-marketplace submission yet.
+optionally install the local Claude Code commands, Codex plugin, or Codex skill from the repo. There is no
+npm package or external marketplace submission yet.
 
 ## What It Does
 
-- launches `cursor-agent` workers with `--print --output-format stream-json --workspace <worktree>`
+- launches `cursor-agent` workers with `--print --output-format stream-json --workspace <worktree> --model composer-2.5-fast`
 - creates isolated git worktrees under `.composer-swarm/state/worktrees/<task-id>/`
 - runs a planner, parallel builders, and a reviewer
 - stores task state, transcripts, and patch artifacts under `.composer-swarm/state/`
@@ -43,6 +43,13 @@ Then run:
 /composer:team fix the failing tests
 /composer:status
 /composer:result
+/composer:verify <task-id>
+```
+
+If your Claude Code install copies the plugin directory instead of using it in place, set:
+
+```bash
+export COMPOSER_SWARM_REPO=/path/to/composer-swarm
 ```
 
 For review-only work:
@@ -57,13 +64,12 @@ The plugin asks whether to wait or run in the background when the choice is not 
 ### Shell Or Codex
 
 Codex users can install the repo-local Codex plugin from [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json),
-or copy [skills/composer-swarm/SKILL.md](skills/composer-swarm/SKILL.md) into their Codex skills directory.
+which bundles [skills/composer-swarm/SKILL.md](skills/composer-swarm/SKILL.md), or copy that skill into their Codex skills directory.
 
 ```bash
 git clone <this-repo-url>
 cd /path/to/your/project
-node /path/to/composer-swarm/bin/composer-swarm.mjs init --trust
-node /path/to/composer-swarm/bin/composer-swarm.mjs doctor
+node /path/to/composer-swarm/bin/composer-swarm.mjs setup --init --trust
 node /path/to/composer-swarm/bin/composer-swarm.mjs team "fix the failing tests" --builders 2
 node /path/to/composer-swarm/bin/composer-swarm.mjs result <task-id>
 node /path/to/composer-swarm/bin/composer-swarm.mjs verify <task-id>
@@ -74,7 +80,7 @@ node /path/to/composer-swarm/bin/composer-swarm.mjs cleanup <task-id>
 Add `.composer-swarm/state/` to the project `.gitignore`. The config can be committed; runtime state usually
 should not be committed.
 
-Use `init --trust` when Cursor prompts for worktree trust in isolated agent workspaces.
+Use `setup --init --trust` when Cursor prompts for worktree trust in isolated agent workspaces.
 
 ## CLI
 
@@ -84,8 +90,8 @@ composer-swarm setup [--init] [--trust] [--force] [--json]
 composer-swarm doctor
 composer-swarm agents
 composer-swarm plan <task text> [--roles a,b,c]
-composer-swarm team <task text> [--builders 2] [--background|--wait] [--model <model>]
-composer-swarm review [--preset repo|security|tests] [--background|--wait] [--model <model>]
+composer-swarm team <task text> [--builders 2] [--background|--wait]
+composer-swarm review [--preset repo|security|tests] [--background|--wait]
 composer-swarm status [task-id]
 composer-swarm result [task-id] [--verbose]
 composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
@@ -100,6 +106,8 @@ composer-swarm cleanup [task-id]
 `setup` is the friendliest entrypoint. It checks git, config, Node, `cursor-agent`, and verifier readiness,
 then prints the next command to run. `setup --init --trust` writes `.composer-swarm/config.json` with trusted
 Cursor worker args.
+
+Composer workers are pinned to Cursor model `composer-2.5-fast`. Other `--model` values are rejected.
 
 ### Review Presets
 
@@ -173,9 +181,9 @@ Claude Code local plugin files live in [plugins/composer-swarm](plugins/composer
 /composer:cancel
 ```
 
-Codex skill instructions live in [skills/composer-swarm/SKILL.md](skills/composer-swarm/SKILL.md). The skill
-requires Codex to inspect results and ask before running `apply`. For Codex users, install or copy the skill
-into your Codex skills directory, then ask Codex to use Composer Swarm for delegation.
+Codex plugin metadata lives in [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json), and the
+skill instructions live in [skills/composer-swarm/SKILL.md](skills/composer-swarm/SKILL.md). The skill
+requires Codex to inspect results and ask before running `apply`.
 
 See [docs/repo-only-release.md](docs/repo-only-release.md) for local install notes and known limits.
 

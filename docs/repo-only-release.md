@@ -8,7 +8,7 @@ Clone the repo and call the CLI with Node:
 
 ```bash
 git clone <composer-swarm-repo-url>
-node /path/to/composer-swarm/bin/composer-swarm.mjs doctor
+node /path/to/composer-swarm/bin/composer-swarm.mjs setup
 ```
 
 Optional shell convenience:
@@ -22,6 +22,7 @@ alias composer-swarm='node /path/to/composer-swarm/bin/composer-swarm.mjs'
 - Node 18.18+
 - git
 - authenticated `cursor-agent`
+- Cursor model `composer-2.5-fast` for all Composer workers
 - a target project that is a git repository
 - clean tracked files before `team` and before `apply`
 
@@ -30,11 +31,11 @@ alias composer-swarm='node /path/to/composer-swarm/bin/composer-swarm.mjs'
 From the target project:
 
 ```bash
-composer-swarm init
-composer-swarm doctor
+composer-swarm setup --init --trust
 composer-swarm team "implement the requested change" --builders 2
 composer-swarm status <task-id>
 composer-swarm result <task-id>
+composer-swarm verify <task-id>
 composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm cleanup <task-id>
 ```
@@ -66,19 +67,26 @@ Commands:
 /composer:team fix the failing tests --builders 2
 /composer:status <task-id>
 /composer:result <task-id>
+/composer:verify <task-id>
 /composer:apply <task-id> --candidate <candidate-id>
 /composer:cancel <task-id>
 ```
 
 The command files are thin wrappers. They return CLI output directly.
 
-## Codex Skill
+## Codex Plugin And Skill
 
-Copy or reference `skills/composer-swarm/SKILL.md` in your Codex skills directory. The skill tells Codex to:
+Install the repo-local Codex plugin from `.agents/plugins/marketplace.json`, or copy
+`skills/composer-swarm/SKILL.md` into your Codex skills directory. The plugin-packaged copy lives at
+`plugins/composer-swarm/skills/composer-swarm/SKILL.md` and should stay identical to the repo-root skill
+file.
 
-- run `doctor`
-- launch `team`
+The skill tells Codex to:
+
+- run `setup`; use `setup --init --trust` when config is missing
+- launch `team` or `review`
 - inspect `status` and `result`
+- run `verify` before recommending a candidate when patches exist
 - review patch artifacts before recommending a candidate
 - ask the user before running `apply`
 
@@ -103,13 +111,13 @@ Commit `.composer-swarm/config.json` if the team configuration is useful to the 
 
 ```bash
 node --test tests/*.test.mjs
-node bin/composer-swarm.mjs doctor
+node bin/composer-swarm.mjs setup
 ```
 
 Then, in a disposable git repository with authenticated `cursor-agent`:
 
 ```bash
-node /path/to/composer-swarm/bin/composer-swarm.mjs init
+node /path/to/composer-swarm/bin/composer-swarm.mjs setup --init --trust
 node /path/to/composer-swarm/bin/composer-swarm.mjs team "make a tiny safe edit" --builders 2
 node /path/to/composer-swarm/bin/composer-swarm.mjs result <task-id>
 ```

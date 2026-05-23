@@ -25,18 +25,24 @@ agent invocations and translate output back into events.
 Claude Code should use slash commands that call the runtime:
 
 ```text
+/composer:setup
 /composer:team [task]
+/composer:review [--preset repo|security|tests]
 /composer:status [task-id]
 /composer:result [task-id]
-/composer:apply [task-id] [candidate-id]
+/composer:verify <task-id>
+/composer:apply [task-id] [--candidate <id>|--recommended]
 /composer:cancel [task-id]
 ```
 
 The command files should be thin, similar to `codex-plugin-cc`:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" team $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" team "$ARGUMENTS"
 ```
+
+If the plugin directory is copied outside this checkout, set `COMPOSER_SWARM_REPO` to the cloned
+composer-swarm repository so the wrapper can reach `bin/composer-swarm.mjs` and shared runtime code.
 
 If Agent Teams are enabled, Claude teammates can still use `/composer:*` commands, but Composer workers
 remain CLI-backed workers, not native Claude teammates.
@@ -45,11 +51,16 @@ remain CLI-backed workers, not native Claude teammates.
 
 Codex should get a skill with simple operating rules:
 
-- use `composer-swarm doctor` before starting
+- use `composer-swarm setup` before starting; run `setup --init --trust` when config is missing
 - use `composer-swarm team "<task>"` to launch Composer workers
+- keep Composer workers on Cursor model `composer-2.5-fast`
 - inspect candidate summaries and patches
-- run Codex review only after candidate patches exist
-- apply the selected patch through `composer-swarm apply`
+- run `composer-swarm verify` before recommending a candidate
+- apply the selected patch through `composer-swarm apply` only after explicit user approval
+
+Install the repo-local Codex plugin from `.agents/plugins/marketplace.json`, or copy
+`skills/composer-swarm/SKILL.md` into the Codex skills directory. Keep the plugin-packaged skill copy in sync
+with the repo-root skill file.
 
 This lets Codex users get Composer parallelism without leaving Codex.
 
