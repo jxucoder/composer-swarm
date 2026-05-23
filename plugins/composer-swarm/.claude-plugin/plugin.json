@@ -1,5 +1,8 @@
 {
   "name": "composer",
   "version": "0.1.0",
-  "description": "Launch repo-local Composer Swarm worker teams from Claude Code."
+  "description": "Launch repo-local Composer Swarm worker teams from Claude Code.",
+  "author": {
+    "name": "local"
+  }
 }

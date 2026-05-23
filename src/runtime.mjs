@@ -11,6 +11,28 @@ const TASK_SCHEMA = "composer-swarm.task.v1";
 const CANDIDATE_SCHEMA = "composer-swarm.candidate.v1";
 const BUILDER_SUFFIXES = ["a", "b", "c", "d"];
 
+export const REVIEW_PRESETS = {
+  repo: [
+    "Perform a comprehensive repository review.",
+    "Inspect architecture, code quality, test coverage, documentation, and maintainability.",
+    "Identify concrete defects, missing tests, security concerns, and technical debt.",
+    "Prioritize actionable findings with file references and suggested fixes.",
+    "Do not edit files; produce a structured review report."
+  ].join(" "),
+  security: [
+    "Perform a security-focused repository review.",
+    "Inspect authentication, authorization, input validation, secrets handling, dependency risks, and unsafe defaults.",
+    "Identify concrete vulnerabilities and misconfigurations with file references.",
+    "Prioritize by severity. Do not edit files; produce a structured security review report."
+  ].join(" "),
+  tests: [
+    "Perform a test-quality and coverage review of this repository.",
+    "Inspect test structure, coverage gaps, flaky patterns, and CI reliability.",
+    "Identify missing tests for critical paths and suggest concrete test additions.",
+    "Do not edit files; produce a structured test review report."
+  ].join(" ")
+};
+
 export function defaultConfig() {
   return {
     version: 1,
@@ -84,6 +106,10 @@ function configPath(workspaceRoot) {
   return path.join(workspaceRoot, CONFIG_DIR, CONFIG_FILE);
 }
 
+export function workspaceConfigFile(workspaceRoot) {
+  return configPath(path.resolve(workspaceRoot));
+}
+
 function parentDir(dir) {
   const parent = path.dirname(dir);
   return parent === dir ? null : parent;
@@ -111,7 +137,13 @@ export function writeDefaultConfig(cwd, options = {}) {
     throw new Error(`${filePath} already exists. Use --force to overwrite it.`);
   }
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(defaultConfig(), null, 2)}\n`, "utf8");
+  const config = defaultConfig();
+  if (options.trust) {
+    config.agents = config.agents.map((agent) =>
+      agent.kind === "cursor-cli" ? { ...agent, args: ["--trust"] } : agent
+    );
+  }
+  fs.writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return filePath;
 }
 
@@ -191,7 +223,8 @@ export function runDoctor(config) {
       continue;
     }
     if (available) {
-      lines.push(`- ${agent.id}: ok (${agent.command})`);
+      const trustNote = agent.kind === "cursor-cli" && (agent.args ?? []).includes("--trust") ? " [trust]" : "";
+      lines.push(`- ${agent.id}: ok (${agent.command})${trustNote}`);
     } else {
       ok = false;
       lines.push(`- ${agent.id}: missing command (${agent.command})`);
@@ -314,6 +347,90 @@ export function findGitRoot(cwd) {
   return result.stdout.trim();
 }
 
+export function findNestedGitRepos(cwd, options = {}) {
+  const maxDepth = options.maxDepth ?? 3;
+  const maxResults = options.maxResults ?? 10;
+  const root = path.resolve(cwd);
+  const found = [];
+
+  function walk(dir, depth) {
+    if (found.length >= maxResults || depth > maxDepth) {
+      return;
+    }
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (found.length >= maxResults) {
+        return;
+      }
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const name = entry.name;
+      if (name === ".git" || name === "node_modules" || name.startsWith(".")) {
+        continue;
+      }
+      const child = path.join(dir, name);
+      const gitRoot = findGitRoot(child);
+      if (gitRoot) {
+        found.push(gitRoot);
+        continue;
+      }
+      walk(child, depth + 1);
+    }
+  }
+
+  walk(root, 0);
+  return [...new Set(found)].sort();
+}
+
+export function resolveWorkspaceContext(cwd, options = {}) {
+  const resolved = path.resolve(cwd);
+  const workspaceRoot = findWorkspaceRoot(resolved);
+  const gitRoot = findGitRoot(resolved);
+  const config = loadConfig(workspaceRoot);
+
+  if (gitRoot) {
+    return { workspaceRoot, gitRoot, config, resolved, nearbyGitRepos: [] };
+  }
+
+  const nearbyGitRepos = findNestedGitRepos(resolved);
+  if (options.requireGit === false) {
+    return { workspaceRoot, gitRoot: null, config, resolved, nearbyGitRepos };
+  }
+
+  if (nearbyGitRepos.length) {
+    const lines = [
+      `Current directory is not inside a git repository: ${resolved}`,
+      "",
+      "Nearby git repositories:"
+    ];
+    for (const repo of nearbyGitRepos) {
+      lines.push(`  cd ${repo}`);
+    }
+    lines.push("");
+    lines.push("Run composer-swarm from a git repository root or use one of the paths above.");
+    throw new Error(lines.join("\n"));
+  }
+
+  throw new Error(
+    `Current directory is not inside a git repository: ${resolved}\nRun composer-swarm from a git repository root.`
+  );
+}
+
+export function reviewObjective(preset = "repo") {
+  const key = String(preset).toLowerCase();
+  if (!REVIEW_PRESETS[key]) {
+    const available = Object.keys(REVIEW_PRESETS).join(", ");
+    throw new Error(`Unknown review preset: ${preset}. Available: ${available}`);
+  }
+  return REVIEW_PRESETS[key];
+}
+
 function runGit(cwd, args, options = {}) {
   const result = spawnSync("git", args, {
     cwd,
@@ -328,11 +445,12 @@ function runGit(cwd, args, options = {}) {
 }
 
 export function requireGitWorkspace(cwd) {
-  const gitRoot = findGitRoot(cwd);
-  if (!gitRoot) {
-    throw new Error("composer-swarm team requires a git repository.");
+  try {
+    const { gitRoot } = resolveWorkspaceContext(cwd);
+    return gitRoot;
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error));
   }
-  return gitRoot;
 }
 
 export function trackedStatus(gitRoot) {
@@ -374,11 +492,17 @@ function gitBranch(gitRoot) {
 
 export function builderRoles(count = 2) {
   const numeric = Number.isFinite(Number(count)) ? Number(count) : 2;
+  if (numeric <= 0) {
+    return [];
+  }
   const bounded = Math.max(1, Math.min(BUILDER_SUFFIXES.length, Math.trunc(numeric)));
   return BUILDER_SUFFIXES.slice(0, bounded).map((suffix) => `builder-${suffix}`);
 }
 
 function executionRoles(options = {}) {
+  if (options.review) {
+    return ["planner", "reviewer"];
+  }
   return ["planner", ...builderRoles(options.builders ?? 2), "reviewer"];
 }
 
@@ -389,6 +513,11 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
 
   const taskId = options.taskId ?? createTaskId();
   const createdAt = new Date().toISOString();
+  const requestedBuilders = options.builders ?? 2;
+  const builderCount = builderRoles(requestedBuilders).length;
+  if (!options.review && builderCount < 1) {
+    throw new Error("composer-swarm team requires 1 to 4 builders.");
+  }
   const roles = executionRoles(options);
   const task = {
     schema: TASK_SCHEMA,
@@ -403,9 +532,10 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
     createdAt,
     updatedAt: createdAt,
     options: {
-      builders: builderRoles(options.builders ?? 2).length,
+      builders: options.review ? 0 : builderCount,
       model: options.model ?? null,
-      background: Boolean(options.background)
+      background: Boolean(options.background),
+      review: Boolean(options.review)
     },
     workers: roles.map((role) => {
       const agent = agentForRole(config, role) ?? fallbackCursorAgent(role);
@@ -524,6 +654,16 @@ export function buildRolePrompt(role, task, context = {}) {
   ];
 
   if (role === "planner") {
+    if (task.options?.review) {
+      return [
+        ...base,
+        "",
+        "Review planning task:",
+        "Define the repository areas the reviewer should inspect.",
+        "Identify likely risk hotspots, missing verification, and documentation gaps.",
+        "Do not edit files."
+      ].join("\n");
+    }
     return [
       ...base,
       "",
@@ -548,6 +688,20 @@ export function buildRolePrompt(role, task, context = {}) {
   }
 
   if (role === "reviewer") {
+    if (task.options?.review) {
+      return [
+        ...base,
+        "",
+        "Planner output:",
+        plannerText,
+        "",
+        "Repository review task:",
+        "Use the objective and planner context to review the repository.",
+        "Do not edit files and do not expect candidate patches.",
+        "Prioritize concrete findings with file references, severity, rationale, and suggested fixes.",
+        "Call out missing tests or verification gaps separately."
+      ].join("\n");
+    }
     return [
       ...base,
       "",
@@ -635,6 +789,15 @@ function finalizeBufferedLine(bufferState) {
   return line;
 }
 
+function cleanWorkerOutput(output, prompt) {
+  const text = String(output ?? "").trim();
+  const promptText = String(prompt ?? "").trim();
+  if (promptText && text.startsWith(promptText)) {
+    return text.slice(promptText.length).trim();
+  }
+  return text;
+}
+
 async function runCursorWorker(config, workspaceRoot, task, role, context = {}) {
   const worker = workerForRole(task, role);
   const agent = agentForRole(config, role) ?? fallbackCursorAgent(role);
@@ -707,7 +870,7 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
           recordLine(stream, line);
         }
       }
-      const finalOutput = outputParts.join("\n").trim();
+      const finalOutput = cleanWorkerOutput(outputParts.join("\n"), prompt);
       const current = safeLoadTask(config, workspaceRoot, task.taskId);
       const cancelled = current?.status === "cancelled";
       if (cancelled) {
@@ -886,20 +1049,22 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
     const builderRoleList = task.workers
       .map((worker) => worker.role)
       .filter((role) => role.startsWith("builder-"));
-    await Promise.all(
-      builderRoleList.map((role) =>
-        runCursorWorker(config, workspaceRoot, task, role, { plannerOutput: planner.finalOutput })
-      )
-    );
-    if (isCancelled(config, workspaceRoot, task.taskId)) {
-      return markCancelled(config, workspaceRoot, task);
-    }
+    if (builderRoleList.length) {
+      await Promise.all(
+        builderRoleList.map((role) =>
+          runCursorWorker(config, workspaceRoot, task, role, { plannerOutput: planner.finalOutput })
+        )
+      );
+      if (isCancelled(config, workspaceRoot, task.taskId)) {
+        return markCancelled(config, workspaceRoot, task);
+      }
 
-    for (const role of builderRoleList) {
-      collectCandidatePatch(config, workspaceRoot, task, role);
+      for (const role of builderRoleList) {
+        collectCandidatePatch(config, workspaceRoot, task, role);
+      }
+      task.status = "patches-collected";
+      saveTask(config, workspaceRoot, task);
     }
-    task.status = "patches-collected";
-    saveTask(config, workspaceRoot, task);
 
     const reviewer = await runCursorWorker(config, workspaceRoot, task, "reviewer", {
       plannerOutput: planner.finalOutput,
@@ -912,6 +1077,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       notes: reviewer.finalOutput || "(reviewer did not provide notes)",
       exitCode: reviewer.exitCode ?? null
     };
+    task.recommendedCandidateId = extractRecommendedCandidate(task);
     task.status = task.workers.some((worker) => worker.status === "failed") ? "failed" : "completed";
     task.completedAt = new Date().toISOString();
     delete task.backgroundPid;
@@ -945,6 +1111,274 @@ export async function runTeam(config, workspaceRoot, objective, options = {}) {
     return task;
   }
   return runTaskWorkflow(config, workspaceRoot, task.taskId);
+}
+
+export function createReviewTask(config, workspaceRoot, preset = "repo", options = {}) {
+  return createTeamTask(config, workspaceRoot, reviewObjective(preset), {
+    ...options,
+    review: true,
+    builders: 0
+  });
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function extractRecommendedCandidate(task) {
+  if (task.recommendedCandidateId) {
+    const existing = (task.candidates ?? []).find((candidate) => candidate.candidateId === task.recommendedCandidateId);
+    if (existing) {
+      return task.recommendedCandidateId;
+    }
+  }
+  const notes = task.reviewer?.notes ?? "";
+  if (!notes.trim() || !task.candidates?.length) {
+    return null;
+  }
+
+  const lines = notes
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const recommendations = [];
+  for (const candidate of task.candidates) {
+    const labels = [candidate.candidateId, candidate.role].filter(Boolean);
+    const labelPattern = new RegExp(`\\b(?:${labels.map(escapeRegExp).join("|")})\\b`, "i");
+    const recommendationPattern = /\b(recommend(?:ed|ation)?|prefer(?:s|red)?|best|winner|choose|selected)\b/i;
+    for (const line of lines) {
+      if (labelPattern.test(line) && recommendationPattern.test(line)) {
+        recommendations.push({ candidate, score: 10 });
+        break;
+      }
+    }
+  }
+
+  if (recommendations.length) {
+    recommendations.sort((a, b) => b.score - a.score);
+    const [first, second] = recommendations;
+    if (!second || first.score > second.score) {
+      return first.candidate.candidateId;
+    }
+  }
+
+  const withPatch = task.candidates.filter((candidate) => candidate.patchFile && candidate.status === "completed");
+  if (withPatch.length === 1) {
+    return withPatch[0].candidateId;
+  }
+  return null;
+}
+
+function verifierAgent(config) {
+  return (config.agents ?? []).find((agent) => agent.role === "verifier" && agent.kind === "shell") ?? null;
+}
+
+function runShellCheck(agent, cwd) {
+  const command = agent.command;
+  const args = agent.args ?? [];
+  const startedAt = new Date().toISOString();
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024 * 20,
+    env: process.env
+  });
+  const commandText = [command, ...args].join(" ");
+  return {
+    command: commandText,
+    status: result.status === 0 ? "passed" : "failed",
+    exitCode: result.status ?? 1,
+    stdout: (result.stdout ?? "").trim(),
+    stderr: (result.stderr ?? "").trim(),
+    startedAt,
+    completedAt: new Date().toISOString()
+  };
+}
+
+function normalizeCheckOutput(check) {
+  return `${check.stdout ?? ""}\n${check.stderr ?? ""}`.trim();
+}
+
+function classifyCheckFailure(candidateCheck, baselineCheck) {
+  if (candidateCheck.status === "passed") {
+    return { ...candidateCheck, baseline: baselineCheck?.status ?? null, classification: "passed" };
+  }
+  if (!baselineCheck || baselineCheck.status === "passed") {
+    return { ...candidateCheck, baseline: baselineCheck?.status ?? null, classification: "candidate-specific" };
+  }
+  const candidateOut = normalizeCheckOutput(candidateCheck);
+  const baselineOut = normalizeCheckOutput(baselineCheck);
+  if (candidateOut === baselineOut || (baselineOut && candidateOut.includes(baselineOut))) {
+    return { ...candidateCheck, baseline: "failed", classification: "baseline" };
+  }
+  return { ...candidateCheck, baseline: "failed", classification: "candidate-specific" };
+}
+
+function baselineWorktreePath(config, workspaceRoot, task) {
+  return statePath(config, workspaceRoot, "worktrees", task.taskId, "__baseline__");
+}
+
+function createBaselineWorktree(config, workspaceRoot, task) {
+  const baselineDir = baselineWorktreePath(config, workspaceRoot, task);
+  fs.mkdirSync(path.dirname(baselineDir), { recursive: true });
+  if (!fs.existsSync(baselineDir)) {
+    runGit(task.gitRoot, ["worktree", "add", "--detach", baselineDir, task.baseSha]);
+  }
+  return baselineDir;
+}
+
+export function verifyCandidate(config, workspaceRoot, taskId, requestedCandidateId, options = {}) {
+  const task = loadTask(config, workspaceRoot, taskId);
+  const candidate = findCandidate(task, requestedCandidateId);
+  if (!candidate) {
+    throw new Error(`Candidate not found for task ${taskId}: ${requestedCandidateId}`);
+  }
+  if (!candidate.worktree || !fs.existsSync(candidate.worktree)) {
+    throw new Error(`Candidate ${candidate.candidateId} worktree is missing. Re-run the task or inspect the patch directly.`);
+  }
+
+  const agent = verifierAgent(config);
+  if (!agent) {
+    throw new Error("No shell verifier agent configured. Add a verifier agent to .composer-swarm/config.json.");
+  }
+
+  const baselineAware = options.baseline !== false;
+  let baselineCheck = null;
+  if (baselineAware && task.baseSha && task.gitRoot) {
+    const baselineWorktree = createBaselineWorktree(config, workspaceRoot, task);
+    baselineCheck = runShellCheck(agent, baselineWorktree);
+  }
+
+  const candidateCheck = runShellCheck(agent, candidate.worktree);
+  const classified = classifyCheckFailure(candidateCheck, baselineCheck);
+
+  const checks = candidate.checks ?? [];
+  const existingIndex = checks.findIndex((check) => check.command === classified.command);
+  const entry = {
+    ...classified,
+    verifiedAt: new Date().toISOString()
+  };
+  if (existingIndex === -1) {
+    checks.push(entry);
+  } else {
+    checks[existingIndex] = entry;
+  }
+  candidate.checks = checks;
+  const candidateIndex = task.candidates.findIndex((entry) => entry.candidateId === candidate.candidateId);
+  if (candidateIndex !== -1) {
+    task.candidates[candidateIndex] = candidate;
+  }
+  saveTask(config, workspaceRoot, task);
+
+  const lines = [
+    `Verified ${candidate.candidateId} (${candidate.role})`,
+    `Command: ${classified.command}`,
+    `Result: ${classified.status}`,
+    `Classification: ${classified.classification}`
+  ];
+  if (baselineCheck) {
+    lines.push(`Baseline: ${baselineCheck.status}`);
+  }
+  if (classified.status === "failed") {
+    const output = normalizeCheckOutput(classified);
+    if (output) {
+      lines.push("", "Output:", output.length > 2000 ? `${output.slice(0, 1997)}...` : output);
+    }
+  }
+  return { task, candidate, check: classified, lines };
+}
+
+export function verifyCandidates(config, workspaceRoot, taskId, options = {}) {
+  const task = loadTask(config, workspaceRoot, taskId);
+  if (!task.candidates?.length) {
+    throw new Error(`Task ${taskId} has no candidates to verify.`);
+  }
+  const outputs = [];
+  for (const candidate of task.candidates) {
+    if (!candidate.worktree) {
+      outputs.push(`Skipped ${candidate.candidateId}: no worktree.`);
+      continue;
+    }
+    const result = verifyCandidate(config, workspaceRoot, taskId, candidate.candidateId, options);
+    outputs.push(result.lines.join("\n"));
+  }
+  return outputs.join("\n\n");
+}
+
+function formatCheckSummary(checks) {
+  if (!checks?.length) {
+    return "none";
+  }
+  return checks
+    .map((check) => {
+      const tag = check.classification ? ` [${check.classification}]` : "";
+      return `${check.status}${tag}`;
+    })
+    .join(", ");
+}
+
+export function formatCandidateComparison(task) {
+  if (!task.candidates?.length) {
+    return "";
+  }
+  const lines = [
+    "",
+    "Comparison:",
+    `${pad("CANDIDATE", 28)} ${pad("FILES", 6)} ${pad("PATCH", 8)} ${pad("CHECKS", 18)} RECOMMENDED`,
+    `${"-".repeat(28)} ${"-".repeat(6)} ${"-".repeat(8)} ${"-".repeat(18)} ${"-".repeat(12)}`
+  ];
+  const recommended = task.recommendedCandidateId ?? extractRecommendedCandidate(task);
+  for (const candidate of task.candidates) {
+    const patchKb = candidate.patchBytes ? `${Math.round(candidate.patchBytes / 1024)}k` : "-";
+    const checks = formatCheckSummary(candidate.checks);
+    const isRecommended = recommended === candidate.candidateId ? "yes" : "";
+    lines.push(
+      `${pad(candidate.candidateId, 28)} ${pad(candidate.changedFiles?.length ?? 0, 6)} ${pad(patchKb, 8)} ${pad(checks, 18)} ${isRecommended}`
+    );
+  }
+  if (recommended) {
+    lines.push("");
+    lines.push(`Recommended: ${recommended}`);
+    lines.push(`Apply: composer-swarm apply ${task.taskId} --recommended`);
+    lines.push(`Or:    composer-swarm apply ${task.taskId} --candidate ${recommended}`);
+  }
+  return lines.join("\n");
+}
+
+function reviewerNotesExcerpt(notes, maxLen = 400) {
+  const compact = String(notes ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ");
+  if (!compact) {
+    return "(no reviewer notes)";
+  }
+  return compact.length > maxLen ? `${compact.slice(0, maxLen - 3)}...` : compact;
+}
+
+function taskGuidance(task) {
+  const lines = [];
+  if (task.status === "completed" || task.status === "patches-collected") {
+    lines.push(`Inspect: composer-swarm result ${task.taskId}`);
+    if (task.recommendedCandidateId) {
+      lines.push(`Apply recommended: composer-swarm apply ${task.taskId} --recommended`);
+    }
+    if (!task.options?.review) {
+      lines.push(`Verify: composer-swarm verify ${task.taskId}`);
+    }
+    lines.push(`Cleanup: composer-swarm cleanup ${task.taskId}`);
+  } else if (task.status === "running" || task.status === "queued") {
+    lines.push(`Poll: composer-swarm status ${task.taskId}`);
+    lines.push(`Cancel: composer-swarm cancel ${task.taskId}`);
+  } else if (task.status === "applied") {
+    lines.push(`Cleanup worktrees: composer-swarm cleanup ${task.taskId}`);
+  } else if (task.status === "cancelled" || task.status === "failed") {
+    lines.push(`Cleanup: composer-swarm cleanup ${task.taskId}`);
+  }
+  const stateDir = ".composer-swarm/state/";
+  lines.push(`Runtime state: ${stateDir} (safe to delete after cleanup)`);
+  return lines;
 }
 
 function formatAge(iso) {
@@ -999,10 +1433,18 @@ export function formatTaskStatus(task) {
     lines.push("- none");
   } else {
     for (const candidate of task.candidates) {
+      const patchSize = candidate.patchBytes ? `${candidate.patchBytes}b` : "none";
       lines.push(
-        `- ${candidate.candidateId}: ${candidate.status}, files=${candidate.changedFiles.length}, patch=${candidate.patchFile ? candidate.patchFile : "none"}`
+        `- ${candidate.candidateId}: ${candidate.status}, files=${candidate.changedFiles.length}, patch=${patchSize}`
       );
     }
+    if (task.recommendedCandidateId) {
+      lines.push(`Recommended: ${task.recommendedCandidateId}`);
+    }
+  }
+  lines.push("", "Next steps:");
+  for (const hint of taskGuidance(task)) {
+    lines.push(`- ${hint}`);
   }
   return lines.join("\n");
 }
@@ -1014,15 +1456,27 @@ export function renderStatus(config, workspaceRoot, taskId = null) {
   return formatTaskList(listTasks(config, workspaceRoot));
 }
 
-function formatChecks(checks) {
+function formatChecks(checks, verbose = false) {
   if (!checks?.length) {
     return "Checks: none recorded";
   }
-  return ["Checks:", ...checks.map((check) => `- ${check.command}: ${check.status}`)].join("\n");
+  const lines = ["Checks:"];
+  for (const check of checks) {
+    const tag = check.classification ? ` (${check.classification})` : "";
+    lines.push(`- ${check.command}: ${check.status}${tag}`);
+    if (verbose && check.status === "failed") {
+      const output = normalizeCheckOutput(check);
+      if (output) {
+        lines.push(`  ${output.split(/\r?\n/).join("\n  ")}`);
+      }
+    }
+  }
+  return lines.join("\n");
 }
 
 export function formatResult(task, options = {}) {
   const workspaceRoot = options.workspaceRoot ?? task.workspaceRoot ?? process.cwd();
+  const verbose = Boolean(options.verbose);
   const lines = [
     `Task: ${task.taskId}`,
     `Status: ${task.status}`,
@@ -1032,40 +1486,48 @@ export function formatResult(task, options = {}) {
   if (!task.candidates?.length) {
     lines.push("No candidates have been collected yet.");
   } else {
+    lines.push(formatCandidateComparison(task));
+    lines.push("");
     lines.push("Candidates:");
     for (const candidate of task.candidates) {
       lines.push("");
       lines.push(`Candidate: ${candidate.candidateId} (${candidate.role})`);
       lines.push(`Status: ${candidate.status}`);
-      lines.push(`Patch: ${candidate.patchFile ? relativePath(workspaceRoot, candidate.patchFile) : "none"}`);
-      lines.push(`Worktree: ${candidate.worktree ? relativePath(workspaceRoot, candidate.worktree) : "none"}`);
-      lines.push("Changed files:");
-      if (candidate.changedFiles.length) {
-        for (const file of candidate.changedFiles) {
-          lines.push(`- ${file}`);
-        }
-      } else {
-        lines.push("- none");
+      lines.push(`Patch: ${candidate.patchBytes ?? 0} bytes`);
+      if (verbose) {
+        lines.push(`Patch file: ${candidate.patchFile ? relativePath(workspaceRoot, candidate.patchFile) : "none"}`);
+        lines.push(`Worktree: ${candidate.worktree ? relativePath(workspaceRoot, candidate.worktree) : "none"}`);
       }
+      lines.push(`Changed files: ${candidate.changedFiles.join(", ") || "(none)"}`);
       lines.push(`Summary: ${candidate.summary}`);
-      lines.push(formatChecks(candidate.checks));
+      lines.push(formatChecks(candidate.checks, verbose));
       if (candidate.patchFile) {
-        lines.push(`Apply command: composer-swarm apply ${task.taskId} --candidate ${candidate.candidateId}`);
+        lines.push(`Apply: composer-swarm apply ${task.taskId} --candidate ${candidate.candidateId}`);
       }
     }
   }
   lines.push("");
   lines.push("Reviewer notes:");
-  lines.push(task.reviewer?.notes ?? "No reviewer notes recorded yet.");
+  if (verbose) {
+    lines.push(task.reviewer?.notes ?? "No reviewer notes recorded yet.");
+  } else {
+    lines.push(reviewerNotesExcerpt(task.reviewer?.notes));
+    lines.push("(use --verbose for full reviewer notes)");
+  }
+  lines.push("");
+  lines.push("Next steps:");
+  for (const hint of taskGuidance(task)) {
+    lines.push(`- ${hint}`);
+  }
   return lines.join("\n");
 }
 
-export function renderResult(config, workspaceRoot, taskId = null) {
+export function renderResult(config, workspaceRoot, taskId = null, options = {}) {
   const task = taskId ? loadTask(config, workspaceRoot, taskId) : latestTask(config, workspaceRoot);
   if (!task) {
     return "No composer-swarm tasks found.";
   }
-  return formatResult(task, { workspaceRoot });
+  return formatResult(task, { workspaceRoot, ...options });
 }
 
 function candidateMatches(candidate, requested) {
@@ -1076,9 +1538,18 @@ function findCandidate(task, requested) {
   return (task.candidates ?? []).find((candidate) => candidateMatches(candidate, requested)) ?? null;
 }
 
-export function applyCandidate(config, workspaceRoot, taskId, requestedCandidateId) {
+export function applyCandidate(config, workspaceRoot, taskId, requestedCandidateId, options = {}) {
   const task = loadTask(config, workspaceRoot, taskId);
-  const candidate = findCandidate(task, requestedCandidateId);
+  let candidateId = requestedCandidateId;
+  if (options.recommended || candidateId === "--recommended") {
+    candidateId = task.recommendedCandidateId ?? extractRecommendedCandidate(task);
+    if (!candidateId) {
+      throw new Error(
+        `No recommended candidate for task ${taskId}. Inspect reviewer notes with: composer-swarm result ${taskId} --verbose`
+      );
+    }
+  }
+  const candidate = findCandidate(task, candidateId);
   if (!candidate) {
     throw new Error(`Candidate not found for task ${taskId}: ${requestedCandidateId}`);
   }
@@ -1173,6 +1644,10 @@ export function cleanupTask(config, workspaceRoot, taskId) {
       removed.push(worker.worktree);
     }
     delete worker.pid;
+  }
+  const baselineWorktree = baselineWorktreePath(config, workspaceRoot, task);
+  if (removeWorktree(task.gitRoot ?? workspaceRoot, baselineWorktree)) {
+    removed.push(baselineWorktree);
   }
   if (task.gitRoot) {
     runGit(task.gitRoot, ["worktree", "prune"], { allowFailure: true });

@@ -1,0 +1,27 @@
+{
+  "name": "composer-swarm",
+  "version": "0.1.0",
+  "description": "Delegate repository work to local Composer/Cursor worker teams.",
+  "author": {
+    "name": "local"
+  },
+  "homepage": "https://github.com/local/composer-swarm",
+  "repository": "https://github.com/local/composer-swarm",
+  "license": "UNLICENSED",
+  "keywords": ["composer", "cursor", "codex", "agents", "review"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Composer Swarm",
+    "shortDescription": "Run local Cursor worker teams from Codex.",
+    "longDescription": "Composer Swarm lets Codex delegate repository work to isolated local Cursor workers, compare candidate patches, verify results, and apply only after explicit approval.",
+    "developerName": "local",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Use Composer Swarm to fix this bug.",
+      "Run a Composer Swarm review.",
+      "Compare Composer Swarm candidates."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

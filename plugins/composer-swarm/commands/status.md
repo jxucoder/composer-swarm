@@ -5,6 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" status $ARGUMENTS`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" status "$ARGUMENTS"`
 
-Return the command output directly. Do not reinterpret it.
+If the user did not pass a task ID, present the compact task table directly.
+If the user passed a task ID, present the full status output directly.

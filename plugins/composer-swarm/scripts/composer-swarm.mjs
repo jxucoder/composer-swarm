@@ -14,8 +14,7 @@ const repoRoot = process.env.COMPOSER_SWARM_REPO
 const cliPath = path.join(repoRoot, "bin", "composer-swarm.mjs");
 
 const [command, ...args] = process.argv.slice(2);
-const cliCommand = command === "setup" ? "doctor" : command;
-const result = spawnSync(process.execPath, [cliPath, cliCommand, ...args], {
+const result = spawnSync(process.execPath, [cliPath, command, ...args], {
   cwd: process.cwd(),
   encoding: "utf8",
   stdio: ["ignore", "pipe", "pipe"]

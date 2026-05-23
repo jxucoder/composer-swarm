@@ -10,16 +10,24 @@ import {
   buildCursorAgentArgs,
   buildRolePrompt,
   cleanupTask,
+  createReviewTask,
   createTeamTask,
   defaultConfig,
+  extractRecommendedCandidate,
+  findNestedGitRepos,
+  formatCandidateComparison,
   formatPlan,
   loadTask,
   planTask,
   renderResult,
   renderStatus,
+  resolveWorkspaceContext,
+  reviewObjective,
   runDoctor,
   runTaskWorkflow,
-  saveTask
+  saveTask,
+  verifyCandidate,
+  writeDefaultConfig
 } from "../src/runtime.mjs";
 
 function git(cwd, args) {
@@ -61,8 +69,13 @@ if (role === "builder-b") {
   fs.writeFileSync(path.join(workspace, "src", "new.txt"), "builder-b\\n", "utf8");
 }
 
+console.log(JSON.stringify({ type: "input", text: prompt }));
 console.log(JSON.stringify({ type: "progress", text: role + " progress" }));
-console.log(JSON.stringify({ type: "final", text: role + " done" }));
+if (role === "reviewer") {
+  console.log(JSON.stringify({ type: "final", text: "Recommend builder-a. builder-a is the best candidate with fewer risks." }));
+} else {
+  console.log(JSON.stringify({ type: "final", text: role + " done" }));
+}
 `,
     "utf8"
   );
@@ -137,6 +150,14 @@ test("role prompts include objective, role, planner output, and candidate contex
   const reviewerPrompt = buildRolePrompt("reviewer", task, { candidateText: "Candidate A patch" });
   assert.match(reviewerPrompt, /Candidate A patch/);
   assert.match(reviewerPrompt, /Do not choose for the user/);
+
+  const reviewOnlyPrompt = buildRolePrompt("reviewer", { ...task, options: { review: true } });
+  assert.match(reviewOnlyPrompt, /Repository review task/);
+  assert.doesNotMatch(reviewOnlyPrompt, /Candidate patches to review/);
+
+  const reviewPlannerPrompt = buildRolePrompt("planner", { ...task, options: { review: true } });
+  assert.match(reviewPlannerPrompt, /Review planning task/);
+  assert.doesNotMatch(reviewPlannerPrompt, /implementation plan for the builders/);
 });
 
 test("workflow creates worktrees, records transcripts, captures modified and new-file patches", async () => {
@@ -178,8 +199,12 @@ test("workflow creates worktrees, records transcripts, captures modified and new
 
   const resultText = renderResult(config, repo, task.taskId);
   assert.match(resultText, /Candidate: task_test-builder-a/);
-  assert.match(resultText, /Apply command: composer-swarm apply task_test --candidate task_test-builder-a/);
+  assert.match(resultText, /Apply: composer-swarm apply task_test --candidate task_test-builder-a/);
+  assert.match(resultText, /Comparison:/);
+  assert.match(resultText, /Recommended: task_test-builder-a/);
+  assert.doesNotMatch(resultText, /You are a Composer worker/);
   assert.match(renderStatus(config, repo, task.taskId), /Status: completed/);
+  assert.match(renderStatus(config, repo, task.taskId), /Next steps:/);
 });
 
 test("applyCandidate applies exactly one stored patch", async () => {
@@ -194,6 +219,20 @@ test("applyCandidate applies exactly one stored patch", async () => {
   assert.equal(fs.readFileSync(path.join(repo, "src", "app.txt"), "utf8"), "builder-a\n");
   assert.equal(fs.existsSync(path.join(repo, "src", "new.txt")), false);
   assert.equal(loadTask(config, repo, task.taskId).status, "applied");
+});
+
+test("applyCandidate --recommended applies the reviewer recommendation", async () => {
+  const repo = makeRepo();
+  const fake = makeFakeCursorAgent(repo);
+  const config = configWithCursor(fake.scriptPath);
+  const task = createTeamTask(config, repo, "change the app", { builders: 2, taskId: "task_recommended" });
+  await runTaskWorkflow(config, repo, task.taskId);
+
+  const stored = loadTask(config, repo, task.taskId);
+  assert.equal(stored.recommendedCandidateId, "task_recommended-builder-a");
+
+  const result = applyCandidate(config, repo, task.taskId, null, { recommended: true });
+  assert.match(result.lines.join("\n"), /Applied task_recommended-builder-a/);
 });
 
 test("applyCandidate rejects missing candidates and dirty main checkout", async () => {
@@ -226,17 +265,125 @@ test("cleanup removes worktrees and process metadata", async () => {
   const repo = makeRepo();
   const fake = makeFakeCursorAgent(repo);
   const config = configWithCursor(fake.scriptPath);
+  config.agents = config.agents.map((agent) =>
+    agent.role === "verifier" ? { ...agent, command: "bash", args: ["-lc", "true"], kind: "shell" } : agent
+  );
   const task = createTeamTask(config, repo, "change the app", { builders: 1, taskId: "task_cleanup" });
   await runTaskWorkflow(config, repo, task.taskId);
+  verifyCandidate(config, repo, task.taskId, "builder-a");
 
   const stored = loadTask(config, repo, task.taskId);
   stored.workers[0].pid = 99999999;
   saveTask(config, repo, stored);
-  const worktrees = stored.workers.map((worker) => worker.worktree).filter(Boolean);
+  const baselineWorktree = path.join(repo, ".composer-swarm", "state", "worktrees", task.taskId, "__baseline__");
+  assert.equal(fs.existsSync(baselineWorktree), true);
+  const worktrees = [...stored.workers.map((worker) => worker.worktree).filter(Boolean), baselineWorktree];
   const cleanup = cleanupTask(config, repo, task.taskId);
   assert.match(cleanup.lines.join("\n"), /Cleaned task_cleanup/);
   for (const worktree of worktrees) {
     assert.equal(fs.existsSync(worktree), false);
   }
   assert.equal("pid" in loadTask(config, repo, task.taskId).workers[0], false);
+});
+
+test("reviewObjective returns preset text and rejects unknown presets", () => {
+  assert.match(reviewObjective("repo"), /comprehensive repository review/i);
+  assert.match(reviewObjective("security"), /security-focused/i);
+  assert.throws(() => reviewObjective("unknown"), /Unknown review preset/);
+});
+
+test("createReviewTask uses planner and reviewer only", () => {
+  const repo = makeRepo();
+  const config = defaultConfig();
+  const task = createReviewTask(config, repo, "tests", { taskId: "task_review" });
+  assert.equal(task.options.review, true);
+  assert.deepEqual(
+    task.workers.map((worker) => worker.role),
+    ["planner", "reviewer"]
+  );
+});
+
+test("createTeamTask rejects zero builders outside review mode", () => {
+  const repo = makeRepo();
+  assert.throws(() => createTeamTask(defaultConfig(), repo, "no builders", { builders: 0 }), /requires 1 to 4 builders/);
+});
+
+test("writeDefaultConfig --trust adds --trust to cursor-cli agents", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-trust-"));
+  const filePath = writeDefaultConfig(dir, { trust: true });
+  const config = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const cursorAgents = config.agents.filter((agent) => agent.kind === "cursor-cli");
+  assert.ok(cursorAgents.length > 0);
+  for (const agent of cursorAgents) {
+    assert.deepEqual(agent.args, ["--trust"]);
+  }
+});
+
+test("resolveWorkspaceContext finds nested git repos when cwd is outside git", () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-nested-"));
+  const repo = makeRepo();
+  const nestedRepo = path.join(parent, "inner-repo");
+  fs.renameSync(repo, nestedRepo);
+  const nestedRepoRoot = fs.realpathSync(nestedRepo);
+  const nested = findNestedGitRepos(parent);
+  assert.deepEqual(nested, [nestedRepoRoot]);
+  assert.throws(() => resolveWorkspaceContext(parent), /Nearby git repositories/);
+
+  const ctx = resolveWorkspaceContext(parent, { requireGit: false });
+  assert.equal(ctx.gitRoot, null);
+  assert.deepEqual(ctx.nearbyGitRepos, [nestedRepoRoot]);
+});
+
+test("verifyCandidate runs shell checks and classifies baseline failures", async () => {
+  const repo = makeRepo();
+  const fake = makeFakeCursorAgent(repo);
+  const config = configWithCursor(fake.scriptPath);
+  config.agents = config.agents.map((agent) =>
+    agent.role === "verifier"
+      ? { ...agent, command: "bash", args: ["-lc", "npm test"], kind: "shell" }
+      : agent
+  );
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ scripts: { test: "node -e \"process.exit(1)\"" } }, null, 2),
+    "utf8"
+  );
+  git(repo, ["add", "package.json"]);
+  git(repo, ["commit", "-q", "-m", "add failing test"]);
+
+  const task = createTeamTask(config, repo, "change the app", { builders: 1, taskId: "task_verify" });
+  await runTaskWorkflow(config, repo, task.taskId);
+
+  const result = verifyCandidate(config, repo, task.taskId, "builder-a");
+  assert.match(result.lines.join("\n"), /Classification: baseline/);
+  assert.equal(result.check.classification, "baseline");
+
+  const stored = loadTask(config, repo, task.taskId);
+  const candidate = stored.candidates.find((entry) => entry.role === "builder-a");
+  assert.equal(candidate.checks.length, 1);
+  assert.equal(candidate.checks[0].classification, "baseline");
+});
+
+test("formatCandidateComparison summarizes patch size and checks", async () => {
+  const repo = makeRepo();
+  const fake = makeFakeCursorAgent(repo);
+  const config = configWithCursor(fake.scriptPath);
+  const task = createTeamTask(config, repo, "change the app", { builders: 2, taskId: "task_compare" });
+  await runTaskWorkflow(config, repo, task.taskId);
+  const stored = loadTask(config, repo, task.taskId);
+  const comparison = formatCandidateComparison(stored);
+  assert.match(comparison, /Comparison:/);
+  assert.match(comparison, /task_compare-builder-a/);
+  assert.match(comparison, /Recommended:/);
+});
+
+test("extractRecommendedCandidate parses reviewer notes", () => {
+  const task = {
+    candidates: [
+      { candidateId: "t-builder-a", role: "builder-a", patchFile: "/a.patch", status: "completed" },
+      { candidateId: "t-builder-b", role: "builder-b", patchFile: "/b.patch", status: "completed" }
+    ],
+    reviewer: { notes: "I recommend builder-a for this task." }
+  };
+  assert.equal(extractRecommendedCandidate(task), "t-builder-a");
 });
