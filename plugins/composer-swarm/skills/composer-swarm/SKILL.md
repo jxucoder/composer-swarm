@@ -40,6 +40,8 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    composer-swarm research "<question>" --workers <1-4> --background
    ```
 
+   Dirty and untracked checkouts are OK for read-only research. The runtime snapshots current changes into isolated read-only worker worktrees. Use `--snapshot-current` or `--include-untracked` when the user explicitly asks to review current uncommitted work.
+
    Good research questions ask for evidence, not conclusions:
    - map a flow across files
    - find every place a behavior is created, transformed, stored, or logged
@@ -69,6 +71,12 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    composer-swarm review --preset repo --scouts <0-4> --background
    composer-swarm review --preset security --scouts <0-4> --background
    composer-swarm review --preset tests --scouts <0-4> --background
+   ```
+
+   For "review my current changes" or prototype repos with untracked files, use:
+
+   ```bash
+   composer-swarm review --preset repo --include-untracked
    ```
 
 4. Inspect progress and output:

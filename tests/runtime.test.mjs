@@ -326,6 +326,12 @@ test("worker prompts include objective, label, planner output, and candidate con
   assert.match(scoutPrompt, /Scout pass/);
   assert.match(scoutPrompt, /Do not edit files/);
   assert.match(scoutPrompt, /inspect runtime/);
+  assert.match(scoutPrompt, /Severity, File, Issue, Why it matters, Suggested fix, and Evidence/);
+
+  const reviewPrompt = buildWorkerPrompt("reviewer", { ...task, options: { review: true, snapshotCurrent: true } });
+  assert.match(reviewPrompt, /snapshot of the user's current uncommitted checkout/);
+  assert.match(reviewPrompt, /Severity: high\|medium\|low/);
+  assert.match(reviewPrompt, /Suggested fix:/);
 
   const researchPrompt = buildWorkerPrompt("research-a", { ...task, options: { research: true, focus: "architecture" } });
   assert.match(researchPrompt, /Research pass/);
@@ -481,6 +487,8 @@ test("research workflow runs read-only workers without candidates or clean-check
   assert.equal(stored.status, "completed");
   assert.equal(stored.options.research, true);
   assert.equal(stored.options.focus, "architecture");
+  assert.equal(stored.options.snapshotCurrent, true);
+  assert.equal(stored.options.snapshotReason, "dirty-worktree");
   assert.equal(stored.candidates.length, 0);
   assert.equal(stored.reviewer, null);
   assert.deepEqual(
@@ -506,6 +514,10 @@ test("research workflow runs read-only workers without candidates or clean-check
   assert.doesNotMatch(resultText, /Candidate:/);
   assert.doesNotMatch(resultText, /Apply:/);
   assert.doesNotMatch(renderStatus(config, repo, task.taskId), /Verify:/);
+  assert.equal(
+    fs.readFileSync(path.join(stored.workers[0].worktree, "src", "app.txt"), "utf8"),
+    "dirty main checkout\n"
+  );
   assert.equal(fs.readFileSync(path.join(repo, "src", "app.txt"), "utf8"), "dirty main checkout\n");
 });
 

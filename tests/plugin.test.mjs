@@ -287,6 +287,45 @@ test("CLI research runs a read-only workflow with quoted arguments", () => {
   assert.match(logs.stdout, /ok/);
 });
 
+test("CLI review can snapshot dirty untracked current checkout", () => {
+  const repo = makeRepo();
+  const fakeBin = makeFakeCursorAgent();
+  fs.mkdirSync(path.join(repo, "src"));
+  fs.mkdirSync(path.join(repo, "tests"));
+  fs.writeFileSync(path.join(repo, "src", "prototype.js"), "export const value = 1;\n", "utf8");
+  fs.writeFileSync(path.join(repo, "tests", "prototype.test.js"), "import '../src/prototype.js';\n", "utf8");
+
+  const result = spawnSync(
+    process.execPath,
+    [CLI, "review", "--preset", "repo", "--include-untracked"],
+    {
+      cwd: repo,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`
+      }
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Started task_/);
+  assert.doesNotMatch(result.stdout, /Apply:/);
+
+  const taskId = /Started (task_[^\s.]+)/.exec(result.stdout)?.[1];
+  assert.ok(taskId, "review command should print a task id");
+  assert.ok(fs.existsSync(path.join(repo, ".composer-swarm", "state", "worktrees", taskId, "planner", "src", "prototype.js")));
+  assert.ok(
+    fs.existsSync(path.join(repo, ".composer-swarm", "state", "worktrees", taskId, "reviewer", "tests", "prototype.test.js"))
+  );
+
+  const task = JSON.parse(fs.readFileSync(path.join(repo, ".composer-swarm", "state", "tasks", `${taskId}.json`), "utf8"));
+  assert.equal(task.options.review, true);
+  assert.equal(task.options.snapshotCurrent, true);
+  assert.match(task.options.snapshotStatus, /\?\? src\//);
+  assert.match(task.options.snapshotStatus, /\?\? tests\//);
+});
+
 test("setup can initialize trusted config from the friendly entrypoint", () => {
   const repo = makeRepo();
   const fakeBin = makeFakeCursorAgent();

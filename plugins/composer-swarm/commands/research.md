@@ -1,6 +1,6 @@
 ---
 description: Run read-only Composer Swarm research while the main agent keeps investigating
-argument-hint: '<question> [--workers 2] [--focus architecture|tests|security|docs|release] [--background|--wait]'
+argument-hint: '<question> [--workers 2] [--focus architecture|tests|security|docs|release] [--include-untracked|--snapshot-current] [--background|--wait]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -12,6 +12,7 @@ Raw slash-command arguments:
 
 Core constraints:
 - This command is research-only.
+- Dirty and untracked checkouts are allowed. The runtime snapshots current changes into read-only worker worktrees when needed.
 - Composer workers use Cursor model `composer-2.5-fast` only.
 - Do not fix issues, create patches, verify candidates, or apply anything from this command.
 - Composer output is evidence and leads for the main agent; it is not authority.

@@ -45,8 +45,8 @@ Usage:
   composer-swarm doctor
   composer-swarm plan <task text>
   composer-swarm team <task text> [--builders 2] [--background|--wait]
-  composer-swarm research <question> [--workers 2] [--focus <area>] [--background|--wait]
-  composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
+  composer-swarm research <question> [--workers 2] [--focus <area>] [--include-untracked|--snapshot-current] [--background|--wait]
+  composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current] [--background|--wait]
   composer-swarm ls
   composer-swarm status [task-id]
   composer-swarm inspect [task-id]
@@ -210,7 +210,9 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
     scouts,
     model: options.model ?? null,
     background: Boolean(options.background),
-    review: isReview
+    review: isReview,
+    snapshotCurrent: Boolean(options["snapshot-current"] || options["include-untracked"]),
+    includeUntracked: Boolean(options["include-untracked"] || options["snapshot-current"])
   });
   if (options.background) {
     const pid = spawnBackgroundTask(workspaceRoot, task.taskId);
@@ -244,7 +246,9 @@ async function runResearchCommand(config, workspaceRoot, question, options) {
     workers,
     focus: options.focus ?? null,
     model: options.model ?? null,
-    background: Boolean(options.background)
+    background: Boolean(options.background),
+    snapshotCurrent: Boolean(options["snapshot-current"] || options["include-untracked"]),
+    includeUntracked: Boolean(options["include-untracked"] || options["snapshot-current"])
   });
   if (options.background) {
     const pid = spawnBackgroundTask(workspaceRoot, task.taskId);

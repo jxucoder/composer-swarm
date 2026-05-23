@@ -1,6 +1,6 @@
 ---
 description: Run a review-only Composer Swarm pass with optional scout workers
-argument-hint: '[--preset repo|security|tests] [--scouts 0..4] [--background|--wait]'
+argument-hint: '[--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current] [--background|--wait]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -12,6 +12,7 @@ Raw slash-command arguments:
 
 Core constraints:
 - This command is review-only.
+- Dirty and untracked checkouts are allowed. The runtime snapshots current changes into read-only worker worktrees when needed.
 - Composer workers use Cursor model `composer-2.5-fast` only.
 - Do not fix issues, apply patches, or suggest that you are about to make changes.
 - The task is read-only; optional scout passes add broader search, and no implementation patches are created.

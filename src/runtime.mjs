@@ -491,10 +491,30 @@ function isRuntimeStateStatusLine(line) {
   return filePath === ".composer-swarm/" || filePath?.startsWith(".composer-swarm/state/");
 }
 
+function statusHasUntracked(statusText) {
+  return String(statusText ?? "")
+    .split(/\r?\n/)
+    .some((line) => line.startsWith("?? "));
+}
+
 export function assertCleanMainCheckout(gitRoot) {
   const status = mainCheckoutStatus(gitRoot);
   if (status) {
-    throw new Error(`Main checkout has changes. Commit, stash, or remove them before continuing.\n${status}`);
+    const untracked = statusHasUntracked(status);
+    const lines = [
+      `Main checkout has changes. Commit, stash, or remove them before continuing.`,
+      untracked ? "Untracked files are present." : "Only tracked changes are present.",
+      "",
+      "Changed files:",
+      status,
+      "",
+      "Read-only workflows can review the current dirty checkout safely:",
+      "  composer-swarm review --preset repo --include-untracked",
+      '  composer-swarm research "review current rewrite" --snapshot-current',
+      "",
+      "Implementation and apply workflows require a clean tracked checkout."
+    ];
+    throw new Error(lines.join("\n"));
   }
 }
 
@@ -546,14 +566,16 @@ function executionWorkerLabels(options = {}) {
 
 export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   const gitRoot = requireGitWorkspace(workspaceRoot);
-  if (!options.research) {
+  const isResearch = Boolean(options.research);
+  const isReadOnlyTask = isResearch || Boolean(options.review);
+  const checkoutStatus = mainCheckoutStatus(gitRoot);
+  if (!isReadOnlyTask) {
     assertCleanMainCheckout(gitRoot);
   }
   ensureStateDirs(config, workspaceRoot);
 
   const taskId = options.taskId ?? createTaskId();
   const createdAt = new Date().toISOString();
-  const isResearch = Boolean(options.research);
   const requestedBuilders = isResearch ? 0 : options.builders ?? 2;
   const builderCount = isResearch ? 0 : builderWorkerLabels(requestedBuilders).length;
   const requestedScouts = options.scouts ?? 0;
@@ -571,6 +593,8 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   }
   const model = resolveCursorModel(config, options.model ?? null);
   const workerLabels = executionWorkerLabels(options);
+  const snapshotRequested = Boolean(options.snapshotCurrent || options.includeUntracked);
+  const snapshotCurrent = isReadOnlyTask && (snapshotRequested || Boolean(checkoutStatus));
   const task = {
     schema: TASK_SCHEMA,
     taskId,
@@ -591,7 +615,11 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
       background: Boolean(options.background),
       review: Boolean(options.review),
       research: isResearch,
-      focus: isResearch ? options.focus ?? null : undefined
+      focus: isResearch ? options.focus ?? null : undefined,
+      snapshotCurrent,
+      snapshotIncludesUntracked: snapshotCurrent,
+      snapshotReason: snapshotCurrent ? (checkoutStatus ? "dirty-worktree" : "requested") : null,
+      snapshotStatus: snapshotCurrent && checkoutStatus ? checkoutStatus : undefined
     },
     workers: workerLabels.map((label) => {
       const agent = agentForWorker(config, label) ?? fallbackCursorAgent(label);
@@ -672,6 +700,67 @@ function artifactPath(config, workspaceRoot, taskId, candidateId) {
   return statePath(config, workspaceRoot, "artifacts", taskId, `${candidateId}.patch`);
 }
 
+function safeRelativePath(relativeFilePath) {
+  const normalized = path.normalize(relativeFilePath);
+  return Boolean(
+    normalized &&
+    !path.isAbsolute(normalized) &&
+    normalized !== ".." &&
+    !normalized.startsWith(`..${path.sep}`)
+  );
+}
+
+function isRuntimeStatePath(relativeFilePath) {
+  return relativeFilePath === ".composer-swarm/state" || relativeFilePath.startsWith(".composer-swarm/state/");
+}
+
+function copyUntrackedFileIntoSnapshot(gitRoot, worktree, relativeFilePath) {
+  if (!safeRelativePath(relativeFilePath) || isRuntimeStatePath(relativeFilePath)) {
+    return;
+  }
+  const source = path.join(gitRoot, relativeFilePath);
+  const destination = path.join(worktree, relativeFilePath);
+  if (!fs.existsSync(source)) {
+    return;
+  }
+  const stat = fs.lstatSync(source);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.rmSync(destination, { recursive: true, force: true });
+  if (stat.isSymbolicLink()) {
+    fs.symlinkSync(fs.readlinkSync(source), destination);
+    return;
+  }
+  if (stat.isDirectory()) {
+    fs.cpSync(source, destination, { recursive: true, dereference: false });
+    return;
+  }
+  if (stat.isFile()) {
+    fs.copyFileSync(source, destination);
+  }
+}
+
+function applyCurrentSnapshot(task, worktree) {
+  const gitRoot = task.gitRoot;
+  const diff = runGit(gitRoot, ["diff", "--binary", "HEAD"], {
+    maxBuffer: 1024 * 1024 * 50
+  }).stdout;
+  if (diff.trim()) {
+    runGit(worktree, ["apply", "--whitespace=nowarn", "--binary"], {
+      input: diff,
+      maxBuffer: 1024 * 1024 * 50
+    });
+  }
+
+  if (task.options?.snapshotIncludesUntracked) {
+    const untracked = runGit(gitRoot, ["ls-files", "--others", "--exclude-standard", "-z"], {
+      maxBuffer: 1024 * 1024 * 20
+    }).stdout;
+    for (const relativeFilePath of untracked.split("\0").filter(Boolean)) {
+      copyUntrackedFileIntoSnapshot(gitRoot, worktree, relativeFilePath);
+    }
+  }
+}
+
 function appendTranscript(filePath, event) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, `${JSON.stringify({ timestamp: new Date().toISOString(), ...event })}\n`, "utf8");
@@ -684,6 +773,9 @@ function createWorktree(config, workspaceRoot, task, workerLabel) {
     return worktree;
   }
   runGit(task.gitRoot, ["worktree", "add", "--detach", worktree, task.baseSha]);
+  if (task.options?.snapshotCurrent) {
+    applyCurrentSnapshot(task, worktree);
+  }
   return worktree;
 }
 
@@ -715,6 +807,9 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
     `Worker label: ${workerLabel}`,
     `Objective: ${task.objective}`,
     `Base commit: ${task.baseSha ?? "unknown"}`,
+    task.options?.snapshotCurrent
+      ? "Workspace note: this isolated worktree includes a snapshot of the user's current uncommitted checkout, including untracked files where available."
+      : null,
     "",
     "Rules:",
     "- Work only in the workspace passed to cursor-agent.",
@@ -722,7 +817,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
     "- Prefer existing project patterns over new abstractions.",
     isResearch ? "- Back every important claim with file paths, line numbers, commands, or reproducible evidence." : "- Report exact checks you ran and their results.",
     isResearch ? "- Treat your output as leads for the host agent to verify, not as final authority." : "- End with a concise summary, changed files, risks, and follow-up notes."
-  ];
+  ].filter((line) => line !== null);
 
   if (workerLabel.startsWith("research-")) {
     return [
@@ -800,7 +895,13 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
         "Repository review pass:",
         "Use the objective, planner context, and scout notes to review the repository.",
         "Do not edit files and do not expect candidate patches.",
-        "Prioritize concrete findings with file references, severity, rationale, and suggested fixes.",
+        "Return findings in this exact structure:",
+        "Severity: high|medium|low",
+        "File: path:line",
+        "Issue: <specific problem>",
+        "Why it matters: <short rationale>",
+        "Suggested fix: <concrete change>",
+        "Evidence: <file path, line, command, or observation>",
         "Call out missing tests or verification gaps separately."
       ].join("\n");
     }
@@ -829,7 +930,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
       "Scout pass:",
       "Do not edit files.",
       scoutFocus(),
-      "Report concrete findings with file references, evidence, severity, and suggested fixes.",
+      "Report concrete findings using Severity, File, Issue, Why it matters, Suggested fix, and Evidence.",
       "Prefer useful negative findings over broad summaries."
     ].join("\n");
   }
@@ -1824,6 +1925,9 @@ export function formatTaskStatus(task) {
     `Updated: ${formatAge(task.updatedAt)}`,
     `Base: ${task.baseBranch ? `${task.baseBranch} ` : ""}${task.baseSha ?? "unknown"}`
   ];
+  if (task.options?.snapshotCurrent) {
+    lines.push(`Snapshot: current checkout (${task.options.snapshotReason ?? "requested"})`);
+  }
   if (task.error) {
     lines.push(`Error: ${task.error}`);
   }
@@ -2050,6 +2154,9 @@ export function renderInspect(config, workspaceRoot, taskId = null) {
     `State root: ${relativePath(workspaceRoot, stateRoot(config, workspaceRoot))}`,
     ""
   ];
+  if (task.options?.snapshotCurrent) {
+    lines.splice(3, 0, `Snapshot: current checkout (${task.options.snapshotReason ?? "requested"})`);
+  }
 
   const transcripts = transcriptEntriesForTask(config, workspaceRoot, task);
   lines.push("Workers:");

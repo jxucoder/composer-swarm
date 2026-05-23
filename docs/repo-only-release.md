@@ -27,6 +27,8 @@ alias composer-swarm='node /path/to/composer-swarm/bin/composer-swarm.mjs'
 - Cursor model `composer-2.5-fast` for all Composer workers
 - a target project that is a git repository
 - clean tracked files before `team` and before `apply`
+- dirty or untracked files are allowed for read-only `research` and `review`; they are snapshotted into
+  worker worktrees
 
 ## Raw CLI Quickstart
 
@@ -36,7 +38,7 @@ From the target project:
 composer-swarm setup --init --trust
 composer-swarm team "implement the requested change" --builders 2
 composer-swarm research "map the config loading flow" --workers 3 --background
-composer-swarm review --preset repo --scouts 2 --background
+composer-swarm review --preset repo --scouts 2 --include-untracked --background
 composer-swarm status <task-id>
 composer-swarm inspect <task-id>
 composer-swarm logs <task-id> --worker <label>
@@ -124,6 +126,8 @@ Runtime config lives at `.composer-swarm/config.json` in the target project. See
 - `distribution.defaultWorkerModel` must stay `composer-2.5-fast`.
 - `workers.composer` configures the `cursor-agent` command used for Composer workers.
 - `verify` requires `workers.verifier`. The default config runs `npm test`.
+- Read-only `research` and `review` snapshot current dirty/untracked checkouts into isolated worktrees.
+  Implementation `team` and `apply` still require a clean checkout.
 - Older `defaultRoles`, `agents[].role`, and `plan --roles` usage has been replaced by worker count flags:
   `team --builders`, `review --scouts`, and `research --workers`.
 - A top-level `policies` field is ignored if present; it is stripped during config load and has no effect in

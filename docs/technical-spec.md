@@ -118,8 +118,8 @@ composer-swarm setup [--init] [--trust] [--force] [--json]
 composer-swarm doctor
 composer-swarm plan <task text>
 composer-swarm team <task text> [--builders 2] [--background|--wait]
-composer-swarm research <question> [--workers 2] [--focus <area>] [--background|--wait]
-composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
+composer-swarm research <question> [--workers 2] [--focus <area>] [--include-untracked|--snapshot-current] [--background|--wait]
+composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current] [--background|--wait]
 composer-swarm ls
 composer-swarm status [task-id]
 composer-swarm inspect [task-id]
@@ -139,6 +139,16 @@ hosted Codex task, or managed task UI.
 `setup` checks git, config, Node, the configured Composer worker command, and the configured shell verifier
 command. `setup --init --trust` writes `.composer-swarm/config.json` with trusted Composer worker args.
 
+Dirty-check behavior is mode-specific:
+
+| Mode | Dirty checkout behavior |
+|---|---|
+| `research` | Allowed; snapshots current tracked and untracked files into read-only worker worktrees |
+| `review` | Allowed; snapshots current tracked and untracked files into read-only worker worktrees |
+| `team` | Blocked until the main checkout is clean |
+| `verify` | Runs against stored candidate worktrees |
+| `apply` | Blocked until the main checkout is clean |
+
 ## Research
 
 Research tasks are read-only and return evidence for the host agent:
@@ -146,11 +156,16 @@ Research tasks are read-only and return evidence for the host agent:
 ```bash
 composer-swarm research "Find every place config is loaded or normalized" --workers 3 --background
 composer-swarm research "Map the release flow and risky manual steps" --workers 4 --focus release
+composer-swarm research "Review the current rewrite" --snapshot-current
 ```
 
 Use `--workers 1..4` to choose breadth. Use `--focus` for a coarse area such as `architecture`, `tests`,
 `security`, `docs`, or `release`. The host agent should continue its own search while research runs, then
 read `result --verbose` and cross-check important claims against the cited files or commands.
+
+Read-only research can run against dirty and untracked checkouts. When the checkout has non-runtime changes,
+the runtime automatically snapshots tracked modifications and untracked files into each read-only worker
+worktree. `--snapshot-current` or `--include-untracked` makes that intent explicit.
 
 ## ComposerDelegate Interface
 
@@ -189,10 +204,13 @@ Review presets avoid long prompts:
 composer-swarm review
 composer-swarm review --preset security
 composer-swarm review --preset tests
+composer-swarm review --preset repo --include-untracked
 ```
 
 Review tasks run a read-only review workflow with optional scout passes. They do not create implementation
-patches.
+patches. Dirty and untracked checkouts are supported by snapshotting current files into read-only worker
+worktrees. This supports the common "review my current changes before I commit" workflow without weakening
+the clean-checkout requirement for implementation and apply.
 
 ## Results
 

@@ -70,6 +70,8 @@ Codex environments that support local skills or plugins should get a skill with 
 - use `composer-swarm setup` before starting; run `setup --init --trust` when config is missing
 - when repo understanding is broad, uncertain, or high-impact, start Codex's own investigation and launch
   `composer-swarm research "<question>" --workers <1-4> --background` as a detached local run
+- for "review my current changes" requests, use read-only review with snapshotting:
+  `composer-swarm review --preset repo --include-untracked`
 - treat research output as evidence-backed leads and cross-check important claims
 - use `composer-swarm team "<task>"` to launch Composer workers
 - keep Composer workers on Cursor model `composer-2.5-fast`

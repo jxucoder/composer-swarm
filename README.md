@@ -105,7 +105,7 @@ In v1 that maps to explicit CLI commands: `research` for read-only evidence, `te
 ## What Stays Safe
 
 - workers use isolated git worktrees
-- research is read-only and has no apply path
+- research and review are read-only, can snapshot dirty/untracked checkouts, and have no apply path
 - Cursor workers are pinned to `composer-2.5-fast`
 - generated state stays under `.composer-swarm/state/`
 - apply is manual and requires an explicit selected candidate
