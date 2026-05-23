@@ -2010,6 +2010,186 @@ export function renderResult(config, workspaceRoot, taskId = null, options = {})
   return formatResult(task, { workspaceRoot, ...options });
 }
 
+function transcriptEntriesForTask(config, workspaceRoot, task) {
+  const entries = new Map();
+  for (const worker of task.workers ?? []) {
+    const label = workerLabelFor(worker);
+    if (!label) {
+      continue;
+    }
+    const transcript = worker.transcript ?? transcriptPath(config, workspaceRoot, task.taskId, label);
+    entries.set(label, { label, transcript, worker });
+  }
+  return [...entries.values()];
+}
+
+function findTranscriptEntry(config, workspaceRoot, task, requestedWorker) {
+  const requested = String(requestedWorker ?? "").trim();
+  if (!requested) {
+    return null;
+  }
+  const entries = transcriptEntriesForTask(config, workspaceRoot, task);
+  return (
+    entries.find((entry) => entry.label === requested) ??
+    entries.find((entry) => `${task.taskId}-${entry.label}` === requested) ??
+    entries.find((entry) => workerDisplayName(entry.label) === requested) ??
+    null
+  );
+}
+
+export function renderInspect(config, workspaceRoot, taskId = null) {
+  const task = taskId ? loadTask(config, workspaceRoot, taskId) : latestTask(config, workspaceRoot);
+  if (!task) {
+    return "No composer-swarm tasks found.";
+  }
+  const lines = [
+    `Task: ${task.taskId}`,
+    `Status: ${task.status}`,
+    `Objective: ${task.objective}`,
+    `State file: ${relativePath(workspaceRoot, taskFile(config, workspaceRoot, task.taskId))}`,
+    `State root: ${relativePath(workspaceRoot, stateRoot(config, workspaceRoot))}`,
+    ""
+  ];
+
+  const transcripts = transcriptEntriesForTask(config, workspaceRoot, task);
+  lines.push("Workers:");
+  if (!transcripts.length) {
+    lines.push("- none recorded");
+  } else {
+    for (const entry of transcripts) {
+      const worker = entry.worker ?? {};
+      const transcriptStatus = fs.existsSync(entry.transcript) ? relativePath(workspaceRoot, entry.transcript) : "not started";
+      const worktree = worker.worktree ? relativePath(workspaceRoot, worker.worktree) : "not created";
+      lines.push(`- ${entry.label}: ${worker.status ?? "unknown"}`);
+      lines.push(`  Transcript: ${transcriptStatus}`);
+      lines.push(`  Worktree: ${worktree}`);
+    }
+  }
+
+  if (task.options?.research) {
+    lines.push("", "Research outputs:");
+    if (!task.research?.length) {
+      lines.push("- none recorded");
+    } else {
+      for (const entry of task.research) {
+        lines.push(`- ${entry.worker}: ${entry.status}`);
+      }
+    }
+  } else {
+    lines.push("", "Candidate artifacts:");
+    if (!task.candidates?.length) {
+      lines.push("- none recorded");
+    } else {
+      for (const candidate of task.candidates) {
+        lines.push(`- ${candidate.candidateId}: ${candidate.status}`);
+        lines.push(`  Patch: ${candidate.patchFile ? relativePath(workspaceRoot, candidate.patchFile) : "none"}`);
+        lines.push(`  Worktree: ${candidate.worktree ? relativePath(workspaceRoot, candidate.worktree) : "none"}`);
+      }
+    }
+  }
+
+  lines.push("", "Useful commands:");
+  lines.push(`- composer-swarm status ${task.taskId}`);
+  lines.push(`- composer-swarm result ${task.taskId} --verbose`);
+  lines.push(`- composer-swarm logs ${task.taskId}`);
+  if (transcripts.length) {
+    lines.push(`- composer-swarm logs ${task.taskId} --worker ${transcripts[0].label}`);
+  }
+  if (!task.options?.research && task.candidates?.length) {
+    lines.push(`- composer-swarm verify ${task.taskId}`);
+  }
+  lines.push(`- composer-swarm cleanup ${task.taskId}`);
+  return lines.join("\n");
+}
+
+function readTranscriptEvents(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+  return fs
+    .readFileSync(filePath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => parseJsonLine(line) ?? { type: "raw", line });
+}
+
+function formatTranscriptEvent(event) {
+  const prefix = [event.timestamp, event.type, event.stream].filter(Boolean).join(" ");
+  if (event.type === "worker-output") {
+    const text = textFromJson(event.event) ?? event.line ?? "";
+    const eventType = event.event?.type ? `${prefix} ${event.event.type}` : prefix;
+    return text ? `${eventType}\n  ${String(text).split(/\r?\n/).join("\n  ")}` : eventType;
+  }
+  if (event.type === "started") {
+    return `${prefix}\n  command=${event.command} args=${(event.args ?? []).join(" ")}`;
+  }
+  if (event.error) {
+    return `${prefix}\n  error=${event.error}`;
+  }
+  if (event.reason) {
+    return `${prefix}\n  reason=${event.reason}`;
+  }
+  if (event.exitCode !== undefined || event.signal !== undefined) {
+    return `${prefix}\n  exit=${event.exitCode ?? "null"} signal=${event.signal ?? "null"}`;
+  }
+  return prefix || JSON.stringify(event);
+}
+
+export function renderLogs(config, workspaceRoot, taskId = null, options = {}) {
+  const task = taskId ? loadTask(config, workspaceRoot, taskId) : latestTask(config, workspaceRoot);
+  if (!task) {
+    return "No composer-swarm tasks found.";
+  }
+  const entries = transcriptEntriesForTask(config, workspaceRoot, task);
+  const requestedWorker = options.worker ?? null;
+  if (!requestedWorker) {
+    const lines = [`Task: ${task.taskId}`, "", "Available transcripts:"];
+    if (!entries.length) {
+      lines.push("- none recorded");
+    } else {
+      for (const entry of entries) {
+        const detail = fs.existsSync(entry.transcript)
+          ? `${relativePath(workspaceRoot, entry.transcript)} (${fs.statSync(entry.transcript).size} bytes)`
+          : "not started";
+        lines.push(`- ${entry.label}: ${detail}`);
+      }
+    }
+    lines.push("", `Use: composer-swarm logs ${task.taskId} --worker <worker-label> [--tail 80]`);
+    return lines.join("\n");
+  }
+
+  const entry = findTranscriptEntry(config, workspaceRoot, task, requestedWorker);
+  if (!entry) {
+    throw new Error(`Task ${task.taskId} has no transcript worker labeled ${requestedWorker}`);
+  }
+  if (!fs.existsSync(entry.transcript)) {
+    return [
+      `Task: ${task.taskId}`,
+      `Worker: ${entry.label}`,
+      `Transcript: ${relativePath(workspaceRoot, entry.transcript)}`,
+      "No transcript file has been written yet."
+    ].join("\n");
+  }
+
+  const events = readTranscriptEvents(entry.transcript);
+  const tail = options.tail === undefined || options.tail === null ? 80 : Number(options.tail);
+  if (!Number.isInteger(tail) || tail < 0) {
+    throw new Error("--tail must be a non-negative integer.");
+  }
+  const shown = tail === 0 ? events : events.slice(-tail);
+  const lines = [
+    `Task: ${task.taskId}`,
+    `Worker: ${entry.label}`,
+    `Transcript: ${relativePath(workspaceRoot, entry.transcript)}`,
+    tail === 0 ? `Events: ${events.length}` : `Events: showing ${shown.length} of ${events.length}`,
+    ""
+  ];
+  for (const event of shown) {
+    lines.push(formatTranscriptEvent(event), "");
+  }
+  return lines.join("\n").trimEnd();
+}
+
 function candidateMatches(candidate, requested) {
   const label = candidateWorkerLabel(candidate);
   return candidate.candidateId === requested || label === requested || candidate.candidateId.endsWith(`-${requested}`);

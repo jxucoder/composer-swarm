@@ -120,7 +120,10 @@ composer-swarm plan <task text>
 composer-swarm team <task text> [--builders 2] [--background|--wait]
 composer-swarm research <question> [--workers 2] [--focus <area>] [--background|--wait]
 composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
+composer-swarm ls
 composer-swarm status [task-id]
+composer-swarm inspect [task-id]
+composer-swarm logs [task-id] [--worker <label>] [--tail 80]
 composer-swarm result [task-id] [--verbose]
 composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
 composer-swarm apply <task-id> --candidate <candidate-id>
@@ -149,6 +152,35 @@ Use `--workers 1..4` to choose breadth. Use `--focus` for a coarse area such as 
 `security`, `docs`, or `release`. The host agent should continue its own search while research runs, then
 read `result --verbose` and cross-check important claims against the cited files or commands.
 
+## ComposerDelegate Interface
+
+The conceptual host-agent interface is:
+
+```ts
+use_composer({
+  task: string,
+  mode: "research" | "implement" | "review",
+  scope?: string[],
+  context?: string
+})
+```
+
+This is not a public TypeScript API in v1. It is the mental model used by the Codex skill and Claude command
+files. The mapping is:
+
+| Conceptual call | v1 command |
+|---|---|
+| `mode: "research"` | `composer-swarm research "<question>" --workers <1-4>` |
+| `mode: "implement"` | `composer-swarm team "<task>" --builders <1-4>` |
+| `mode: "review"` | `composer-swarm review --preset repo --scouts <0-4>` |
+| inspect task state | `composer-swarm inspect <task-id>` |
+| inspect worker output | `composer-swarm logs <task-id> --worker <label>` |
+| verify candidate patches | `composer-swarm verify <task-id>` |
+| apply approved candidate | `composer-swarm apply <task-id> --candidate <candidate-id>` |
+
+`scope` and `context` should be folded into the natural-language task text for now, for example:
+`composer-swarm research "Map auth token flow. Focus on src/auth and tests/auth. Context: release blocker."`
+
 ## Reviews
 
 Review presets avoid long prompts:
@@ -170,6 +202,30 @@ check output.
 
 For research tasks, `result --verbose` shows each research worker's evidence and transcript path. It never
 prints apply commands.
+
+## Inspect And Logs
+
+`inspect` shows the local task file, state root, worker transcript paths, worktree paths, candidate patch
+paths, and useful next commands:
+
+```bash
+composer-swarm inspect <task-id>
+```
+
+`logs` lists available worker transcripts when no worker is selected:
+
+```bash
+composer-swarm logs <task-id>
+```
+
+To print one worker transcript:
+
+```bash
+composer-swarm logs <task-id> --worker builder-a --tail 80
+```
+
+Use `--tail 0` to print the full transcript. These commands are the local substitute for a hosted background
+task UI in repo-only v1.
 
 ## Verification
 
@@ -211,6 +267,8 @@ Claude Code local plugin files live in `plugins/composer-swarm`. They expose:
 /composer:research
 /composer:review
 /composer:status
+/composer:inspect
+/composer:logs
 /composer:result
 /composer:verify
 /composer:apply

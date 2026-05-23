@@ -37,6 +37,8 @@ Claude Code should use slash commands that call the runtime:
 /composer:research [question] [--workers 1..4] [--focus architecture|tests|security|docs|release]
 /composer:review [--preset repo|security|tests] [--scouts 0..4]
 /composer:status [task-id]
+/composer:inspect [task-id]
+/composer:logs [task-id] [--worker <label>] [--tail 80]
 /composer:result [task-id]
 /composer:verify <task-id>
 /composer:apply [task-id] [--candidate <id>|--recommended]
@@ -72,6 +74,7 @@ Codex environments that support local skills or plugins should get a skill with 
 - use `composer-swarm team "<task>"` to launch Composer workers
 - keep Composer workers on Cursor model `composer-2.5-fast`
 - inspect candidate summaries and patches
+- use `composer-swarm inspect` and `composer-swarm logs` when detached local runs need local-state detail
 - run `composer-swarm verify` before recommending a candidate
 - apply the selected patch through `composer-swarm apply` only after explicit user approval
 

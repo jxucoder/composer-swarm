@@ -38,6 +38,8 @@ composer-swarm team "implement the requested change" --builders 2
 composer-swarm research "map the config loading flow" --workers 3 --background
 composer-swarm review --preset repo --scouts 2 --background
 composer-swarm status <task-id>
+composer-swarm inspect <task-id>
+composer-swarm logs <task-id> --worker <label>
 composer-swarm result <task-id>
 composer-swarm verify <task-id>
 composer-swarm apply <task-id> --candidate <candidate-id>
@@ -50,6 +52,8 @@ task state under `.composer-swarm/state/`; it is not a hosted background-agent s
 ```bash
 composer-swarm team "investigate the regression" --builders 2 --background
 composer-swarm status <task-id>
+composer-swarm inspect <task-id>
+composer-swarm logs <task-id>
 composer-swarm result <task-id>
 ```
 
@@ -81,6 +85,8 @@ Commands:
 /composer:team fix the failing tests --builders 2
 /composer:research map the config loading flow --workers 3
 /composer:status <task-id>
+/composer:inspect <task-id>
+/composer:logs <task-id> --worker <label>
 /composer:result <task-id>
 /composer:verify <task-id>
 /composer:apply <task-id> --candidate <candidate-id>
@@ -105,6 +111,7 @@ The skill tells Codex to:
 - for broad repo understanding, start its own investigation and launch `research --workers <1-4>` in parallel
 - choose `team --builders <1-4>` or `review --scouts <0-4>` from the user's request
 - inspect `status` and `result`
+- inspect local state and transcripts with `inspect` and `logs` when needed
 - run `verify` before recommending a candidate when patches exist
 - review patch artifacts before recommending a candidate
 - ask the user before running `apply`

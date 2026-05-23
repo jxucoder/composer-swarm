@@ -2,10 +2,10 @@
 
 > **Claude or Codex stays in charge. Fast Composer workers search, think, and draft options.**
 
-Composer Swarm lets Claude Code or Codex delegate repository work to local Cursor/Composer workers without
-making the human drive a second CLI. Composer is fast and low-cost enough to run parallel passes for wider
-code search, extra reasoning, alternate implementations, and review-only checks while the main agent keeps
-control of judgment and apply.
+Composer Swarm is a repo-local ComposerDelegate runtime. It lets Claude Code or Codex delegate repository
+work to local Cursor/Composer workers without making the human drive a second CLI. Composer is fast and
+low-cost enough to run parallel passes for wider code search, extra reasoning, alternate implementations,
+and review-only checks while the main agent keeps control of judgment and apply.
 
 The design borrows OpenAI Swarm's lightweight routines-and-handoffs pattern: the host skill or plugin is the
 routine, CLI commands are tool calls, Composer workers are bounded handoffs, and task state is explicit on
@@ -17,6 +17,7 @@ disk.
 - `/composer:research` for read-only repo search while the main agent keeps investigating
 - `/composer:review` for review-only broader search and extra critique
 - `/composer:status` and `/composer:result` to follow detached local runs
+- `/composer:inspect` and `/composer:logs` to inspect local state, worktrees, patches, and worker transcripts
 - `/composer:verify` to run configured checks against candidates
 - `/composer:apply` to apply exactly one selected candidate patch
 
@@ -62,6 +63,8 @@ One simple first run is:
 /composer:team fix the failing tests --background
 /composer:research map the config loading flow --background
 /composer:status
+/composer:inspect
+/composer:logs
 /composer:result
 ```
 
@@ -86,9 +89,18 @@ Use Composer Swarm to review this project with three scouts.
 Use Composer Swarm to fix the failing tests with two builders.
 ```
 
-With the skill installed, Codex runs setup/status/result/verify/apply commands from your project when the
-workflow calls for them. Without skill support, tell Codex to use the CLI directly; those commands are in the
-[technical spec](docs/technical-spec.md).
+With the skill installed, Codex runs setup/status/inspect/logs/result/verify/apply commands from your project
+when the workflow calls for them. Without skill support, tell Codex to use the CLI directly; those commands
+are in the [technical spec](docs/technical-spec.md).
+
+Conceptually, the host agent is calling:
+
+```text
+use_composer(task, mode, scope, context)
+```
+
+In v1 that maps to explicit CLI commands: `research` for read-only evidence, `team` for candidate patches,
+`review` for critique, `inspect`/`logs` for local state, and `verify`/`apply` for guarded finalization.
 
 ## What Stays Safe
 

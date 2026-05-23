@@ -19,6 +19,8 @@ import {
   loadConfig,
   planTask,
   recordBackgroundPid,
+  renderInspect,
+  renderLogs,
   renderResult,
   renderStatus,
   researchWorkerLabels,
@@ -45,7 +47,10 @@ Usage:
   composer-swarm team <task text> [--builders 2] [--background|--wait]
   composer-swarm research <question> [--workers 2] [--focus <area>] [--background|--wait]
   composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--background|--wait]
+  composer-swarm ls
   composer-swarm status [task-id]
+  composer-swarm inspect [task-id]
+  composer-swarm logs [task-id] [--worker <label>] [--tail 80]
   composer-swarm result [task-id] [--verbose]
   composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
   composer-swarm apply <task-id> --candidate <candidate-id>
@@ -210,7 +215,7 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
   if (options.background) {
     const pid = spawnBackgroundTask(workspaceRoot, task.taskId);
     recordBackgroundPid(config, workspaceRoot, task.taskId, pid);
-    console.log(`Started ${task.taskId} in background.`);
+    console.log(`Started ${task.taskId} as a detached local run.`);
     console.log(`Status: composer-swarm status ${task.taskId}`);
     console.log(`Result: composer-swarm result ${task.taskId}`);
     return task;
@@ -244,7 +249,7 @@ async function runResearchCommand(config, workspaceRoot, question, options) {
   if (options.background) {
     const pid = spawnBackgroundTask(workspaceRoot, task.taskId);
     recordBackgroundPid(config, workspaceRoot, task.taskId, pid);
-    console.log(`Started ${task.taskId} in background.`);
+    console.log(`Started ${task.taskId} as a detached local run.`);
     console.log(`Status: composer-swarm status ${task.taskId}`);
     console.log(`Result: composer-swarm result ${task.taskId} --verbose`);
     return task;
@@ -384,9 +389,27 @@ async function main() {
     return;
   }
 
-  if (command === "status") {
+  if (command === "status" || command === "ls") {
     const { workspaceRoot, config } = workspaceContext(cwd, { requireGit: false });
-    console.log(renderStatus(config, workspaceRoot, args[0] ?? null));
+    console.log(renderStatus(config, workspaceRoot, command === "ls" ? null : args[0] ?? null));
+    return;
+  }
+
+  if (command === "inspect") {
+    const { workspaceRoot, config } = workspaceContext(cwd, { requireGit: false });
+    console.log(renderInspect(config, workspaceRoot, args[0] ?? null));
+    return;
+  }
+
+  if (command === "logs") {
+    const { options, positionals } = parseArgs(args, ["worker", "tail"]);
+    const { workspaceRoot, config } = workspaceContext(cwd, { requireGit: false });
+    console.log(
+      renderLogs(config, workspaceRoot, positionals[0] ?? null, {
+        worker: options.worker ?? null,
+        tail: options.tail ?? undefined
+      })
+    );
     return;
   }
 

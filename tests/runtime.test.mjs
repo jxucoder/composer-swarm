@@ -23,6 +23,8 @@ import {
   loadTask,
   planTask,
   researchWorkerLabels,
+  renderInspect,
+  renderLogs,
   renderResult,
   renderStatus,
   resolveWorkspaceContext,
@@ -377,6 +379,21 @@ test("workflow creates worktrees, records transcripts, captures modified and new
   assert.doesNotMatch(resultText, /You are a Composer worker/);
   assert.match(renderStatus(config, repo, task.taskId), /Status: completed/);
   assert.match(renderStatus(config, repo, task.taskId), /Next steps:/);
+
+  const inspectText = renderInspect(config, repo, task.taskId);
+  assert.match(inspectText, /State file: \.composer-swarm\/state\/tasks\/task_test\.json/);
+  assert.match(inspectText, /composer-swarm logs task_test --worker planner/);
+  assert.match(inspectText, /Candidate artifacts:/);
+  assert.match(inspectText, /task_test-builder-a/);
+
+  const logsList = renderLogs(config, repo, task.taskId);
+  assert.match(logsList, /Available transcripts:/);
+  assert.match(logsList, /builder-a: \.composer-swarm\/state\/transcripts\/task_test\/builder-a\.jsonl/);
+
+  const builderLog = renderLogs(config, repo, task.taskId, { worker: "builder-a", tail: 20 });
+  assert.match(builderLog, /Worker: builder-a/);
+  assert.match(builderLog, /builder-a progress/);
+  assert.match(builderLog, /builder-a done/);
 });
 
 test("workflow does not overwrite a cancellation after reviewer finishes", async () => {

@@ -52,6 +52,8 @@ test("Claude Code command files preserve plugin UX and quote raw arguments", () 
   const setup = read("plugins/composer-swarm/commands/setup.md");
   const result = read("plugins/composer-swarm/commands/result.md");
   const status = read("plugins/composer-swarm/commands/status.md");
+  const inspect = read("plugins/composer-swarm/commands/inspect.md");
+  const logs = read("plugins/composer-swarm/commands/logs.md");
   const apply = read("plugins/composer-swarm/commands/apply.md");
 
   assert.match(team, /disable-model-invocation: true/);
@@ -106,6 +108,14 @@ test("Claude Code command files preserve plugin UX and quote raw arguments", () 
   assert.match(status, /status "\$ARGUMENTS"/);
   assert.match(status, /worker states/i);
   assert.match(status, /next-step commands/i);
+
+  assert.match(inspect, /inspect "\$ARGUMENTS"/);
+  assert.match(inspect, /state paths/i);
+  assert.match(inspect, /transcript paths/i);
+
+  assert.match(logs, /logs "\$ARGUMENTS"/);
+  assert.match(logs, /worker transcripts/i);
+  assert.match(logs, /timeout details/i);
 
   assert.match(apply, /apply "\$ARGUMENTS"/);
   assert.match(apply, /explicitly requested/i);
@@ -259,6 +269,22 @@ test("CLI research runs a read-only workflow with quoted arguments", () => {
   assert.match(result.stdout, /Research:/);
   assert.match(result.stdout, /Result: composer-swarm result task_.* --verbose/);
   assert.doesNotMatch(result.stdout, /Apply:/);
+
+  const taskId = /Started (task_[^\s.]+)/.exec(result.stdout)?.[1];
+  assert.ok(taskId, "research command should print a task id");
+
+  const inspect = spawnSync(process.execPath, [CLI, "inspect", taskId], { cwd: repo, encoding: "utf8" });
+  assert.equal(inspect.status, 0, inspect.stderr);
+  assert.match(inspect.stdout, new RegExp(`Task: ${taskId}`));
+  assert.match(inspect.stdout, /composer-swarm logs .* --worker research-a/);
+
+  const logs = spawnSync(process.execPath, [CLI, "logs", taskId, "--worker", "research-a"], {
+    cwd: repo,
+    encoding: "utf8"
+  });
+  assert.equal(logs.status, 0, logs.stderr);
+  assert.match(logs.stdout, /Worker: research-a/);
+  assert.match(logs.stdout, /ok/);
 });
 
 test("setup can initialize trusted config from the friendly entrypoint", () => {

@@ -75,8 +75,11 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
 
    ```bash
    composer-swarm status <task-id>
+   composer-swarm inspect <task-id>
    composer-swarm result <task-id>
    composer-swarm result <task-id> --verbose
+   composer-swarm logs <task-id>
+   composer-swarm logs <task-id> --worker <worker-label>
    ```
 
 5. Verify candidates before recommending one when implementation patches exist:
