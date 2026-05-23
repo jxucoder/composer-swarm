@@ -1,8 +1,11 @@
 {
   "name": "composer",
   "version": "0.1.0",
-  "description": "Launch repo-local Composer Swarm worker teams from Claude Code.",
+  "description": "Delegate repository work from Claude Code to local Composer worker teams.",
   "author": {
-    "name": "local"
-  }
+    "name": "jxucoder"
+  },
+  "homepage": "https://github.com/jxucoder/composer-swarm",
+  "repository": "https://github.com/jxucoder/composer-swarm",
+  "license": "MIT"
 }

@@ -1,5 +1,5 @@
 ---
-description: Show candidate comparison, reviewer notes, and next steps for a composer-swarm task
+description: Show candidate comparison, reviewer notes, and next steps for a Composer Swarm task
 argument-hint: '[task-id] [--verbose]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)

@@ -1,5 +1,5 @@
 ---
-description: Show active and recent composer-swarm tasks for this repository
+description: Show active and recent Composer Swarm tasks for this repository
 argument-hint: '[task-id]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)

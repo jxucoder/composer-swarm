@@ -1,19 +1,19 @@
 {
-  "name": "composer-swarm-local",
+  "name": "jxucoder-composer-swarm",
   "owner": {
-    "name": "local"
+    "name": "jxucoder"
   },
   "metadata": {
-    "description": "Composer Swarm plugin for local worker teams, reviews, verification, and candidate apply.",
+    "description": "Delegate repository work from Claude Code to local Composer worker teams.",
     "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "composer",
-      "description": "Launch local Cursor/Composer workers through composer-swarm.",
+      "description": "Delegate coding tasks from Claude Code to local Cursor/Composer workers.",
       "version": "0.1.0",
       "author": {
-        "name": "local"
+        "name": "jxucoder"
       },
       "source": "./plugins/composer-swarm"
     }

@@ -109,23 +109,32 @@ test("plugin manifests expose both Claude Code and Codex plugin metadata", () =>
   const claude = JSON.parse(read("plugins/composer-swarm/.claude-plugin/plugin.json"));
   assert.equal(claude.name, "composer");
   assert.equal(claude.version, PACKAGE_VERSION);
-  assert.equal(claude.author.name, "local");
+  assert.equal(claude.author.name, "jxucoder");
+  assert.equal(claude.homepage, "https://github.com/jxucoder/composer-swarm");
+  assert.equal(claude.repository, "https://github.com/jxucoder/composer-swarm");
+  assert.equal(claude.license, "MIT");
 
   const codex = JSON.parse(read("plugins/composer-swarm/.codex-plugin/plugin.json"));
   assert.equal(codex.name, "composer-swarm");
   assert.equal(codex.version, PACKAGE_VERSION);
+  assert.equal(codex.author.name, "jxucoder");
   assert.equal(codex.license, "MIT");
   assert.equal(codex.skills, "./skills/");
   assert.equal(codex.interface.displayName, "Composer Swarm");
-  assert.equal(codex.homepage, undefined);
-  assert.equal(codex.repository, undefined);
+  assert.equal(codex.interface.developerName, "jxucoder");
+  assert.equal(codex.homepage, "https://github.com/jxucoder/composer-swarm");
+  assert.equal(codex.repository, "https://github.com/jxucoder/composer-swarm");
 
   const marketplace = JSON.parse(read(".agents/plugins/marketplace.json"));
+  assert.equal(marketplace.name, "composer-swarm");
+  assert.equal(marketplace.interface.displayName, "Composer Swarm");
   assert.equal(marketplace.plugins[0].name, "composer-swarm");
   assert.equal(marketplace.plugins[0].source.path, "./plugins/composer-swarm");
   assert.equal(marketplace.plugins[0].policy.installation, "AVAILABLE");
 
   const claudeMarketplace = JSON.parse(read(".claude-plugin/marketplace.json"));
+  assert.equal(claudeMarketplace.name, "jxucoder-composer-swarm");
+  assert.equal(claudeMarketplace.owner.name, "jxucoder");
   assert.equal(claudeMarketplace.metadata.version, PACKAGE_VERSION);
   assert.equal(claudeMarketplace.plugins[0].version, PACKAGE_VERSION);
 });

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Repo-local CLI that launches Cursor/Composer worker teams from Claude Code, Codex, or a shell.",
+  "description": "Delegate repository work from Claude Code or Codex to local Composer worker teams.",
   "bin": {
     "composer-swarm": "./bin/composer-swarm.mjs"
   },

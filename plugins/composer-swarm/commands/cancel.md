@@ -1,5 +1,5 @@
 ---
-description: Cancel a running composer-swarm task
+description: Cancel a running Composer Swarm task
 argument-hint: '<task-id>'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)

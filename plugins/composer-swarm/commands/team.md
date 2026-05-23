@@ -1,5 +1,5 @@
 ---
-description: Launch a local Composer worker team for a task
+description: Delegate a repository task to local Composer worker candidates
 argument-hint: '<task> [--builders 2] [--background|--wait]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion

@@ -1,5 +1,5 @@
 ---
-description: Apply exactly one stored composer-swarm candidate patch
+description: Apply exactly one stored Composer Swarm candidate patch
 argument-hint: '<task-id> --candidate <candidate-id>|--recommended'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)

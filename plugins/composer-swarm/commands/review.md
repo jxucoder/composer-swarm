@@ -1,5 +1,5 @@
 ---
-description: Launch a planner and reviewer for a preset repository review
+description: Run a review-only Composer Swarm pass with planner and reviewer workers
 argument-hint: '[--preset repo|security|tests] [--background|--wait]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion

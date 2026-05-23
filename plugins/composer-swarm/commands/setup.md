@@ -1,5 +1,5 @@
 ---
-description: Check whether composer-swarm, git, and cursor-agent are ready for this repository
+description: Health-check Composer Swarm, git, and cursor-agent for this repository
 argument-hint: '[--init] [--trust] [--force]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), AskUserQuestion

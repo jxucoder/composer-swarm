@@ -7,6 +7,8 @@ description: Delegate repo tasks to local Composer/Cursor worker teams, compare 
 
 Use this skill when the user asks Codex to delegate implementation or review work to Composer/Cursor workers, compare swarm candidates, verify candidates, or apply a selected patch.
 
+Role split: Codex plans and reviews. Composer writes isolated candidates. Codex verifies, compares, and applies only after explicit approval.
+
 ## Runtime
 
 - Prefer `composer-swarm` when it is on `PATH`.

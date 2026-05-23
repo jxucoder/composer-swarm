@@ -1,5 +1,5 @@
 ---
-description: Run configured shell checks against composer-swarm candidate worktrees
+description: Run configured checks against Composer Swarm candidate worktrees
 argument-hint: '<task-id> [--candidate <candidate-id>] [--no-baseline]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*)

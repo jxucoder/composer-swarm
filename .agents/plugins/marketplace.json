@@ -1,7 +1,7 @@
 {
-  "name": "composer-swarm-local",
+  "name": "composer-swarm",
   "interface": {
-    "displayName": "Composer Swarm Local"
+    "displayName": "Composer Swarm"
   },
   "plugins": [
     {

@@ -1,18 +1,20 @@
 {
   "name": "composer-swarm",
   "version": "0.1.0",
-  "description": "Delegate repository work to local Composer/Cursor worker teams.",
+  "description": "Delegate repository work from Codex to local Composer worker teams.",
   "author": {
-    "name": "local"
+    "name": "jxucoder"
   },
+  "homepage": "https://github.com/jxucoder/composer-swarm",
+  "repository": "https://github.com/jxucoder/composer-swarm",
   "license": "MIT",
   "keywords": ["composer", "cursor", "codex", "agents", "review"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Composer Swarm",
-    "shortDescription": "Run local Cursor worker teams from Codex.",
-    "longDescription": "Composer Swarm lets Codex delegate repository work to isolated local Cursor workers, compare candidate patches, verify results, and apply only after explicit approval.",
-    "developerName": "local",
+    "shortDescription": "Run local Composer worker teams from Codex.",
+    "longDescription": "Composer Swarm lets Codex delegate repository work to isolated local Cursor/Composer workers, compare candidate patches, verify results, and apply only after explicit approval.",
+    "developerName": "jxucoder",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
