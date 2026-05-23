@@ -219,7 +219,7 @@ test("CLI accepts quoted raw slash-command arguments", () => {
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Objective: fix quoted task/);
-  assert.match(result.stdout, /Execution plan:/);
+  assert.match(result.stdout, /Worker passes:/);
   assert.match(result.stdout, /implementation pass A \(can edit\)/);
   assert.match(result.stdout, /review pass \(read-only\)/);
   assert.doesNotMatch(result.stdout, /composer-builder-a/);

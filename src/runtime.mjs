@@ -193,7 +193,7 @@ export function runDoctor(config) {
   }
 
   lines.push("Workers:");
-  const composer = agentForRole(config, "builder-a");
+  const composer = agentForWorker(config, "builder-a");
   const composerAvailable = commandAvailable(composer.command);
   if (composerAvailable) {
     const trustNote = (composer.args ?? []).includes("--trust") ? " [trust]" : "";
@@ -219,44 +219,47 @@ export function runDoctor(config) {
   return { ok, lines };
 }
 
-function agentForRole(config, role) {
-  const legacyExact = (config.agents ?? []).find((agent) => agent.role === role && agent.kind === "cursor-cli");
+function agentForWorker(config, workerLabel) {
+  const legacyExact = (config.agents ?? []).find((agent) => agent.role === workerLabel && agent.kind === "cursor-cli");
   if (legacyExact) {
+    const { role: _legacyRole, ...agent } = legacyExact;
     return {
-      ...legacyExact,
-      canEdit: role.startsWith("builder-")
+      ...agent,
+      label: workerLabel,
+      canEdit: workerLabel.startsWith("builder-")
     };
   }
   const worker = config.workers?.composer;
   if (worker?.command) {
     return {
-      id: `${worker.id ?? "composer"}-${role}`,
+      id: `${worker.id ?? "composer"}-${workerLabel}`,
       kind: worker.kind ?? "cursor-cli",
-      role,
+      label: workerLabel,
       command: worker.command,
       args: worker.args ?? [],
-      canEdit: role.startsWith("builder-")
+      canEdit: workerLabel.startsWith("builder-")
     };
   }
   const legacyAny = (config.agents ?? []).find((agent) => agent.kind === "cursor-cli" && agent.command);
   if (legacyAny) {
+    const { role: _legacyRole, ...agent } = legacyAny;
     return {
-      ...legacyAny,
-      id: `${legacyAny.id ?? "composer"}-${role}`,
-      role,
-      canEdit: role.startsWith("builder-")
+      ...agent,
+      id: `${legacyAny.id ?? "composer"}-${workerLabel}`,
+      label: workerLabel,
+      canEdit: workerLabel.startsWith("builder-")
     };
   }
-  return fallbackCursorAgent(role);
+  return fallbackCursorAgent(workerLabel);
 }
 
-function fallbackCursorAgent(role) {
+function fallbackCursorAgent(workerLabel) {
   return {
-    id: `composer-${role}`,
+    id: `composer-${workerLabel}`,
     kind: "cursor-cli",
-    role,
+    label: workerLabel,
     command: "cursor-agent",
-    canEdit: role.startsWith("builder-")
+    canEdit: workerLabel.startsWith("builder-")
   };
 }
 
@@ -272,63 +275,24 @@ export function resolveCursorModel(config, requestedModel = null) {
 }
 
 export function planTask(config, taskText, options = {}) {
-  const roles = executionRoles(options);
-  const workers = roles.map((role) => ({
-    phase: role,
-    role,
-    canEdit: role.startsWith("builder-"),
-    objective: roleObjective(role, taskText)
+  const workerLabels = executionWorkerLabels(options);
+  const workers = workerLabels.map((label) => ({
+    label,
+    canEdit: label.startsWith("builder-")
   }));
   return {
     schema: "composer-swarm.plan.v1",
     objective: taskText,
-    workers,
-    roles: workers
+    workers
   };
 }
 
-function roleObjective(role, taskText) {
-  switch (role) {
-    case "operator":
-      return `Stay in the user's current host, supervise the Composer team, and choose the final patch: ${taskText}`;
-    case "planner":
-      return `Prepare a concise implementation plan, likely file scopes, acceptance criteria, risks, and checks: ${taskText}`;
-    case "builder-a":
-      return `Produce the smallest direct implementation attempt in an isolated worktree: ${taskText}`;
-    case "builder-b":
-      return `Produce an alternate implementation attempt or parallel subtask in an isolated worktree: ${taskText}`;
-    case "scout-a":
-      return `Inspect architecture and runtime flow without editing files: ${taskText}`;
-    case "scout-b":
-      return `Inspect tests, CI, packaging, and docs without editing files: ${taskText}`;
-    case "scout-c":
-      return `Inspect security, process handling, and configuration risks without editing files: ${taskText}`;
-    case "scout-d":
-      return `Inspect usability, maintenance, and edge-case risks without editing files: ${taskText}`;
-    case "reviewer":
-      return `Review candidate patches for concrete defects, regressions, and missing tests: ${taskText}`;
-    case "adversary":
-      return `Challenge assumptions, edge cases, and whether the approach is too complex: ${taskText}`;
-    case "verifier":
-      return `Run or define reproducible checks against the selected candidate and report exact results: ${taskText}`;
-    default:
-      if (role.startsWith("builder-")) {
-        return `Produce an implementation attempt in an isolated worktree: ${taskText}`;
-      }
-      if (role.startsWith("scout-")) {
-        return `Inspect a focused repo area without editing files and report concrete findings: ${taskText}`;
-      }
-      return taskText;
-  }
-}
-
 export function formatPlan(plan) {
-  const lines = [`Objective: ${plan.objective}`, "", "Execution plan:"];
-  for (const entry of plan.workers ?? plan.roles ?? []) {
-    const label = workerDisplayName(entry.phase ?? entry.role);
+  const lines = [`Objective: ${plan.objective}`, "", "Worker passes:"];
+  for (const entry of plan.workers ?? []) {
+    const label = workerDisplayName(workerLabelFor(entry));
     const access = entry.canEdit ? "can edit" : "read-only";
     lines.push(`- ${label} (${access})`);
-    lines.push(`  ${entry.objective}`);
   }
   return lines.join("\n");
 }
@@ -541,7 +505,7 @@ function gitBranch(gitRoot) {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
-export function builderRoles(count = 2) {
+export function builderWorkerLabels(count = 2) {
   const numeric = Number.isFinite(Number(count)) ? Number(count) : 2;
   if (numeric <= 0) {
     return [];
@@ -550,7 +514,7 @@ export function builderRoles(count = 2) {
   return BUILDER_SUFFIXES.slice(0, bounded).map((suffix) => `builder-${suffix}`);
 }
 
-export function scoutRoles(count = 0) {
+export function scoutWorkerLabels(count = 0) {
   const numeric = Number.isFinite(Number(count)) ? Number(count) : 0;
   if (numeric <= 0) {
     return [];
@@ -559,7 +523,7 @@ export function scoutRoles(count = 0) {
   return SCOUT_SUFFIXES.slice(0, bounded).map((suffix) => `scout-${suffix}`);
 }
 
-export function researchRoles(count = 2) {
+export function researchWorkerLabels(count = 2) {
   const numeric = Number.isFinite(Number(count)) ? Number(count) : 2;
   if (numeric <= 0) {
     return [];
@@ -568,14 +532,14 @@ export function researchRoles(count = 2) {
   return RESEARCH_SUFFIXES.slice(0, bounded).map((suffix) => `research-${suffix}`);
 }
 
-function executionRoles(options = {}) {
+function executionWorkerLabels(options = {}) {
   if (options.research) {
-    return researchRoles(options.workers ?? 2);
+    return researchWorkerLabels(options.workers ?? 2);
   }
   if (options.review) {
-    return ["planner", ...scoutRoles(options.scouts ?? 0), "reviewer"];
+    return ["planner", ...scoutWorkerLabels(options.scouts ?? 0), "reviewer"];
   }
-  return ["planner", ...builderRoles(options.builders ?? 2), "reviewer"];
+  return ["planner", ...builderWorkerLabels(options.builders ?? 2), "reviewer"];
 }
 
 export function createTeamTask(config, workspaceRoot, objective, options = {}) {
@@ -589,11 +553,11 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   const createdAt = new Date().toISOString();
   const isResearch = Boolean(options.research);
   const requestedBuilders = isResearch ? 0 : options.builders ?? 2;
-  const builderCount = isResearch ? 0 : builderRoles(requestedBuilders).length;
+  const builderCount = isResearch ? 0 : builderWorkerLabels(requestedBuilders).length;
   const requestedScouts = options.scouts ?? 0;
-  const scoutCount = scoutRoles(requestedScouts).length;
+  const scoutCount = scoutWorkerLabels(requestedScouts).length;
   const requestedResearchWorkers = options.workers ?? 2;
-  const researchCount = isResearch ? researchRoles(requestedResearchWorkers).length : 0;
+  const researchCount = isResearch ? researchWorkerLabels(requestedResearchWorkers).length : 0;
   if (isResearch && Number(requestedResearchWorkers) !== researchCount) {
     throw new Error("composer-swarm research requires 1 to 4 workers.");
   }
@@ -604,7 +568,7 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
     throw new Error("composer-swarm review requires 0 to 4 scouts.");
   }
   const model = resolveCursorModel(config, options.model ?? null);
-  const roles = executionRoles(options);
+  const workerLabels = executionWorkerLabels(options);
   const task = {
     schema: TASK_SCHEMA,
     taskId,
@@ -627,10 +591,10 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
       research: isResearch,
       focus: isResearch ? options.focus ?? null : undefined
     },
-    workers: roles.map((role) => {
-      const agent = agentForRole(config, role) ?? fallbackCursorAgent(role);
+    workers: workerLabels.map((label) => {
+      const agent = agentForWorker(config, label) ?? fallbackCursorAgent(label);
       return {
-        role,
+        label,
         agentId: agent.id,
         kind: agent.kind,
         command: agent.command,
@@ -674,24 +638,32 @@ export function latestTask(config, workspaceRoot) {
   return listTasks(config, workspaceRoot)[0] ?? null;
 }
 
-function workerForRole(task, role) {
-  const worker = task.workers.find((entry) => entry.role === role);
+function workerLabelFor(entry) {
+  return entry?.label ?? entry?.workerLabel ?? entry?.worker ?? entry?.role ?? null;
+}
+
+function candidateWorkerLabel(candidate) {
+  return candidate?.workerLabel ?? candidate?.label ?? candidate?.worker ?? candidate?.role ?? null;
+}
+
+function workerForLabel(task, workerLabel) {
+  const worker = task.workers.find((entry) => workerLabelFor(entry) === workerLabel);
   if (!worker) {
-    throw new Error(`Task ${task.taskId} has no worker for role ${role}`);
+    throw new Error(`Task ${task.taskId} has no worker labeled ${workerLabel}`);
   }
   return worker;
 }
 
-function candidateIdFor(task, role) {
-  return `${task.taskId}-${role}`;
+function candidateIdFor(task, workerLabel) {
+  return `${task.taskId}-${workerLabel}`;
 }
 
 function relativePath(workspaceRoot, filePath) {
   return path.relative(workspaceRoot, filePath) || ".";
 }
 
-function transcriptPath(config, workspaceRoot, taskId, role) {
-  return statePath(config, workspaceRoot, "transcripts", taskId, `${role}.jsonl`);
+function transcriptPath(config, workspaceRoot, taskId, workerLabel) {
+  return statePath(config, workspaceRoot, "transcripts", taskId, `${workerLabel}.jsonl`);
 }
 
 function artifactPath(config, workspaceRoot, taskId, candidateId) {
@@ -703,8 +675,8 @@ function appendTranscript(filePath, event) {
   fs.appendFileSync(filePath, `${JSON.stringify({ timestamp: new Date().toISOString(), ...event })}\n`, "utf8");
 }
 
-function createWorktree(config, workspaceRoot, task, role) {
-  const worktree = statePath(config, workspaceRoot, "worktrees", task.taskId, role);
+function createWorktree(config, workspaceRoot, task, workerLabel) {
+  const worktree = statePath(config, workspaceRoot, "worktrees", task.taskId, workerLabel);
   fs.mkdirSync(path.dirname(worktree), { recursive: true });
   if (fs.existsSync(worktree)) {
     return worktree;
@@ -713,19 +685,24 @@ function createWorktree(config, workspaceRoot, task, role) {
   return worktree;
 }
 
-export function buildCursorAgentArgs({ role, worktree, prompt, model }) {
+export function buildCursorAgentArgs({ workerLabel, worktree, prompt, model }) {
   const args = ["--print", "--output-format", "stream-json", "--workspace", worktree];
   if (model) {
     args.push("--model", model);
   }
-  if (role === "planner" || role === "reviewer" || role.startsWith("scout-") || role.startsWith("research-")) {
+  if (
+    workerLabel === "planner" ||
+    workerLabel === "reviewer" ||
+    workerLabel.startsWith("scout-") ||
+    workerLabel.startsWith("research-")
+  ) {
     args.push("--mode=plan");
   }
   args.push(prompt);
   return args;
 }
 
-export function buildRolePrompt(role, task, context = {}) {
+export function buildWorkerPrompt(workerLabel, task, context = {}) {
   const plannerText = context.plannerOutput?.trim() || "No planner output is available yet.";
   const candidateText = context.candidateText?.trim() || "No candidates are available yet.";
   const scoutText = context.scoutText?.trim() || "No scout notes are available yet.";
@@ -733,7 +710,7 @@ export function buildRolePrompt(role, task, context = {}) {
   const base = [
     "You are a Composer worker launched by composer-swarm.",
     `Task id: ${task.taskId}`,
-    `Role: ${role}`,
+    `Worker label: ${workerLabel}`,
     `Objective: ${task.objective}`,
     `Base commit: ${task.baseSha ?? "unknown"}`,
     "",
@@ -745,14 +722,15 @@ export function buildRolePrompt(role, task, context = {}) {
     isResearch ? "- Treat your output as leads for the host agent to verify, not as final authority." : "- End with a concise summary, changed files, risks, and follow-up notes."
   ];
 
-  if (role.startsWith("research-")) {
+  if (workerLabel.startsWith("research-")) {
     return [
       ...base,
       "",
-      "Research task:",
+      "Research pass:",
       "Use Cursor's repository search and code-understanding tools aggressively.",
-      researchFocus(role, task.options?.focus),
-      "The host agent is also doing its own investigation in parallel; avoid broad summaries and return evidence it can reconcile.",
+      researchFocus(task.options?.focus),
+      "Independently choose a useful search angle and avoid broad summaries.",
+      "The host agent is also doing its own investigation in parallel; return evidence it can reconcile.",
       "",
       "Required output format:",
       "Research question: <repeat the question>",
@@ -772,13 +750,13 @@ export function buildRolePrompt(role, task, context = {}) {
     ].join("\n");
   }
 
-  if (role === "planner") {
+  if (workerLabel === "planner") {
     if (task.options?.review) {
       return [
         ...base,
         "",
-        "Review planning task:",
-        "Define the repository areas the reviewer should inspect.",
+        "Review planning pass:",
+        "Define the repository areas the review pass should inspect.",
         "Identify likely risk hotspots, missing verification, and documentation gaps.",
         "Do not edit files."
       ].join("\n");
@@ -786,27 +764,27 @@ export function buildRolePrompt(role, task, context = {}) {
     return [
       ...base,
       "",
-      "Planner task:",
-      "Produce a scoped implementation plan for the builders.",
+      "Planning pass:",
+      "Produce a scoped implementation plan for the implementation workers.",
       "Identify likely files, acceptance criteria, risks, and suggested checks.",
       "Do not edit files."
     ].join("\n");
   }
 
-  if (role.startsWith("builder-")) {
+  if (workerLabel.startsWith("builder-")) {
     return [
       ...base,
       "",
       "Planner output:",
       plannerText,
       "",
-      "Builder task:",
+      "Implementation pass:",
       "Implement one complete candidate patch in this isolated worktree.",
       "Leave the final diff in the worktree for composer-swarm to collect."
     ].join("\n");
   }
 
-  if (role === "reviewer") {
+  if (workerLabel === "reviewer") {
     if (task.options?.review) {
       return [
         ...base,
@@ -817,7 +795,7 @@ export function buildRolePrompt(role, task, context = {}) {
         "Scout notes:",
         scoutText,
         "",
-        "Repository review task:",
+        "Repository review pass:",
         "Use the objective, planner context, and scout notes to review the repository.",
         "Do not edit files and do not expect candidate patches.",
         "Prioritize concrete findings with file references, severity, rationale, and suggested fixes.",
@@ -833,22 +811,22 @@ export function buildRolePrompt(role, task, context = {}) {
       "Candidate patches to review:",
       candidateText,
       "",
-      "Reviewer task:",
+      "Patch review pass:",
       "Review the candidates for concrete bugs, regressions, conflicts, and missing tests.",
       "Do not apply or edit any candidate. Do not choose for the user; report objective findings."
     ].join("\n");
   }
 
-  if (role.startsWith("scout-")) {
+  if (workerLabel.startsWith("scout-")) {
     return [
       ...base,
       "",
       "Planner output:",
       plannerText,
       "",
-      "Scout task:",
+      "Scout pass:",
       "Do not edit files.",
-      scoutFocus(role),
+      scoutFocus(),
       "Report concrete findings with file references, evidence, severity, and suggested fixes.",
       "Prefer useful negative findings over broad summaries."
     ].join("\n");
@@ -857,35 +835,13 @@ export function buildRolePrompt(role, task, context = {}) {
   return base.join("\n");
 }
 
-function scoutFocus(role) {
-  switch (role) {
-    case "scout-a":
-      return "Focus on architecture, core runtime flow, task lifecycle, and state transitions.";
-    case "scout-b":
-      return "Focus on tests, CI, packaging, install flow, and documentation accuracy.";
-    case "scout-c":
-      return "Focus on security, process cancellation, environment exposure, and configuration enforcement.";
-    case "scout-d":
-      return "Focus on usability, command ergonomics, maintainability, and edge cases.";
-    default:
-      return "Focus on a distinct repo area that adds useful coverage beyond the planner.";
-  }
+function scoutFocus() {
+  return "Independently choose a useful inspection angle that adds coverage beyond the planning pass and other workers.";
 }
 
-function researchFocus(role, focus) {
+function researchFocus(focus) {
   const requested = focus ? `Requested focus: ${focus}.` : "Requested focus: broad repository research.";
-  switch (role) {
-    case "research-a":
-      return `${requested} Emphasize architecture, data flow, entry points, and cross-file relationships.`;
-    case "research-b":
-      return `${requested} Emphasize tests, CI, packaging, docs, and examples related to the question.`;
-    case "research-c":
-      return `${requested} Emphasize security, configuration, process handling, errors, and edge cases.`;
-    case "research-d":
-      return `${requested} Emphasize usability, release risks, maintenance risks, and hidden coupling.`;
-    default:
-      return `${requested} Pick a distinct angle that adds coverage beyond the other research workers.`;
-  }
+  return `${requested} Pick a distinct angle that adds useful coverage for the host agent.`;
 }
 
 function parseJsonLine(line) {
@@ -966,14 +922,14 @@ function cleanWorkerOutput(output, prompt) {
   return text;
 }
 
-async function runCursorWorker(config, workspaceRoot, task, role, context = {}) {
-  const worker = workerForRole(task, role);
-  const agent = agentForRole(config, role) ?? fallbackCursorAgent(role);
-  const worktree = createWorktree(config, workspaceRoot, task, role);
-  const transcript = transcriptPath(config, workspaceRoot, task.taskId, role);
-  const prompt = buildRolePrompt(role, task, context);
+async function runCursorWorker(config, workspaceRoot, task, workerLabel, context = {}) {
+  const worker = workerForLabel(task, workerLabel);
+  const agent = agentForWorker(config, workerLabel) ?? fallbackCursorAgent(workerLabel);
+  const worktree = createWorktree(config, workspaceRoot, task, workerLabel);
+  const transcript = transcriptPath(config, workspaceRoot, task.taskId, workerLabel);
+  const prompt = buildWorkerPrompt(workerLabel, task, context);
   const cursorArgs = buildCursorAgentArgs({
-    role,
+    workerLabel,
     worktree,
     prompt,
     model: task.options?.model ?? null
@@ -992,7 +948,7 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
   appendTranscript(transcript, {
     type: "started",
     taskId: task.taskId,
-    role,
+    worker: workerLabel,
     agentId: agent.id,
     command: agent.command,
     args: redactPromptArg(args)
@@ -1019,7 +975,7 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
       appendTranscript(transcript, {
         type: "worker-output",
         taskId: task.taskId,
-        role,
+        worker: workerLabel,
         stream,
         event: parsed,
         line: parsed ? undefined : line
@@ -1060,7 +1016,7 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
         appendTranscript(transcript, {
           type: "retry",
           taskId: task.taskId,
-          role,
+          worker: workerLabel,
           reason: "cursor-cli-config-race",
           nextAttempt: attempts + 1
         });
@@ -1090,7 +1046,7 @@ async function runCursorWorker(config, workspaceRoot, task, role, context = {}) 
       appendTranscript(transcript, {
         type: worker.status,
         taskId: task.taskId,
-        role,
+        worker: workerLabel,
         exitCode: worker.exitCode,
         signal: worker.signal,
         error: worker.error
@@ -1156,18 +1112,18 @@ function includeUntrackedInDiff(worktree) {
   runGit(worktree, ["add", "-N", "."], { allowFailure: true });
 }
 
-export function collectCandidatePatch(config, workspaceRoot, task, role) {
-  const worker = workerForRole(task, role);
+export function collectCandidatePatch(config, workspaceRoot, task, workerLabel) {
+  const worker = workerForLabel(task, workerLabel);
   const worktree = worker.worktree;
   if (!worktree) {
-    throw new Error(`Worker ${role} has no worktree.`);
+    throw new Error(`Worker ${workerLabel} has no worktree.`);
   }
 
   includeUntrackedInDiff(worktree);
   const diff = runGit(worktree, ["diff", "--binary", "HEAD"], { maxBuffer: 1024 * 1024 * 50 }).stdout;
   const status = runGit(worktree, ["status", "--porcelain"]).stdout;
   const changedFiles = parseStatusFiles(status);
-  const candidateId = candidateIdFor(task, role);
+  const candidateId = candidateIdFor(task, workerLabel);
   let patchFile = null;
   if (diff.trim()) {
     patchFile = artifactPath(config, workspaceRoot, task.taskId, candidateId);
@@ -1178,7 +1134,7 @@ export function collectCandidatePatch(config, workspaceRoot, task, role) {
   const candidate = {
     schema: CANDIDATE_SCHEMA,
     candidateId,
-    role,
+    workerLabel,
     status: worker.status,
     summary: trimForSummary(worker.finalOutput) || "(worker did not provide a summary)",
     risk: "unknown",
@@ -1226,7 +1182,7 @@ function candidateReviewText(config, workspaceRoot, task) {
       const truncatedPatch = patch.length > 12000 ? `${patch.slice(0, 12000)}\n...[patch truncated]` : patch;
       return [
         `Candidate: ${candidate.candidateId}`,
-        `Role: ${candidate.role}`,
+        `Worker label: ${candidateWorkerLabel(candidate) ?? "unknown"}`,
         `Status: ${candidate.status}`,
         `Changed files: ${candidate.changedFiles.join(", ") || "(none)"}`,
         `Summary: ${candidate.summary}`,
@@ -1245,7 +1201,7 @@ function scoutReviewText(task) {
   return scouts
     .map((scout) =>
       [
-        `Scout: ${scout.role}`,
+        `Scout: ${workerLabelFor(scout) ?? "unknown"}`,
         `Status: ${scout.status}`,
         `Notes: ${scout.notes || "(no notes)"}`
       ].join("\n")
@@ -1265,17 +1221,17 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
 
   try {
     if (task.options?.research) {
-      const researchRoleList = task.workers
-        .map((worker) => worker.role)
-        .filter((role) => role.startsWith("research-"));
+      const researchWorkerList = task.workers
+        .map(workerLabelFor)
+        .filter((label) => label?.startsWith("research-"));
       const researchWorkers = await Promise.all(
-        researchRoleList.map((role) => runCursorWorker(config, workspaceRoot, task, role))
+        researchWorkerList.map((label) => runCursorWorker(config, workspaceRoot, task, label))
       );
       if (isCancelled(config, workspaceRoot, task.taskId)) {
         return markCancelled(config, workspaceRoot, task);
       }
       task.research = researchWorkers.map((worker) => ({
-        worker: worker.role,
+        worker: workerLabelFor(worker),
         status: worker.status,
         transcript: worker.transcript,
         notes: worker.finalOutput || "(research worker did not provide notes)",
@@ -1293,20 +1249,20 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       return markCancelled(config, workspaceRoot, task);
     }
 
-    const scoutRoleList = task.workers
-      .map((worker) => worker.role)
-      .filter((role) => role.startsWith("scout-"));
-    if (scoutRoleList.length) {
+    const scoutWorkerList = task.workers
+      .map(workerLabelFor)
+      .filter((label) => label?.startsWith("scout-"));
+    if (scoutWorkerList.length) {
       const scouts = await Promise.all(
-        scoutRoleList.map((role) =>
-          runCursorWorker(config, workspaceRoot, task, role, { plannerOutput: planner.finalOutput })
+        scoutWorkerList.map((label) =>
+          runCursorWorker(config, workspaceRoot, task, label, { plannerOutput: planner.finalOutput })
         )
       );
       if (isCancelled(config, workspaceRoot, task.taskId)) {
         return markCancelled(config, workspaceRoot, task);
       }
       task.scouts = scouts.map((scout) => ({
-        role: scout.role,
+        worker: workerLabelFor(scout),
         status: scout.status,
         transcript: scout.transcript,
         notes: scout.finalOutput || "(scout did not provide notes)",
@@ -1315,21 +1271,21 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       saveTask(config, workspaceRoot, task);
     }
 
-    const builderRoleList = task.workers
-      .map((worker) => worker.role)
-      .filter((role) => role.startsWith("builder-"));
-    if (builderRoleList.length) {
+    const builderWorkerList = task.workers
+      .map(workerLabelFor)
+      .filter((label) => label?.startsWith("builder-"));
+    if (builderWorkerList.length) {
       await Promise.all(
-        builderRoleList.map((role) =>
-          runCursorWorker(config, workspaceRoot, task, role, { plannerOutput: planner.finalOutput })
+        builderWorkerList.map((label) =>
+          runCursorWorker(config, workspaceRoot, task, label, { plannerOutput: planner.finalOutput })
         )
       );
       if (isCancelled(config, workspaceRoot, task.taskId)) {
         return markCancelled(config, workspaceRoot, task);
       }
 
-      for (const role of builderRoleList) {
-        collectCandidatePatch(config, workspaceRoot, task, role);
+      for (const label of builderWorkerList) {
+        collectCandidatePatch(config, workspaceRoot, task, label);
       }
       task.status = "patches-collected";
       saveTask(config, workspaceRoot, task);
@@ -1341,7 +1297,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       scoutText: scoutReviewText(task)
     });
     task.reviewer = {
-      role: "reviewer",
+      worker: "reviewer",
       status: reviewer.status,
       transcript: reviewer.transcript,
       notes: reviewer.finalOutput || "(reviewer did not provide notes)",
@@ -1429,7 +1385,7 @@ export function extractRecommendedCandidate(task) {
     .filter(Boolean);
   const recommendations = [];
   for (const candidate of task.candidates) {
-    const labels = [candidate.candidateId, candidate.role].filter(Boolean);
+    const labels = [candidate.candidateId, candidateWorkerLabel(candidate)].filter(Boolean);
     const labelPattern = new RegExp(`\\b(?:${labels.map(escapeRegExp).join("|")})\\b`, "i");
     const recommendationPattern = /\b(recommend(?:ed|ation)?|prefer(?:s|red)?|best|winner|choose|selected)\b/i;
     for (const line of lines) {
@@ -1570,7 +1526,7 @@ export function verifyCandidate(config, workspaceRoot, taskId, requestedCandidat
   saveTask(config, workspaceRoot, task);
 
   const lines = [
-    `Verified ${candidate.candidateId} (${candidate.role})`,
+    `Verified ${candidate.candidateId} (${candidateWorkerLabel(candidate) ?? "unknown"})`,
     `Command: ${classified.command}`,
     `Result: ${classified.status}`,
     `Classification: ${classified.classification}`
@@ -1724,13 +1680,14 @@ export function formatTaskStatus(task) {
   }
   lines.push("", "Workers:");
   for (const worker of task.workers ?? []) {
+    const label = workerLabelFor(worker) ?? "unknown";
     const detail = [
       worker.exitCode !== undefined && worker.exitCode !== null ? `exit=${worker.exitCode}` : null,
       worker.worktree ? `worktree=${worker.worktree}` : null
     ]
       .filter(Boolean)
       .join(" ");
-    lines.push(`- ${worker.role}: ${worker.status}${detail ? ` (${detail})` : ""}`);
+    lines.push(`- ${label}: ${worker.status}${detail ? ` (${detail})` : ""}`);
   }
   if (task.options?.research) {
     lines.push("", "Research:");
@@ -1813,7 +1770,7 @@ export function formatResult(task, options = {}) {
     lines.push("Candidates:");
     for (const candidate of task.candidates) {
       lines.push("");
-      lines.push(`Candidate: ${candidate.candidateId} (${candidate.role})`);
+      lines.push(`Candidate: ${candidate.candidateId} (${candidateWorkerLabel(candidate) ?? "unknown"})`);
       lines.push(`Status: ${candidate.status}`);
       lines.push(`Patch: ${candidate.patchBytes ?? 0} bytes`);
       if (verbose) {
@@ -1833,7 +1790,7 @@ export function formatResult(task, options = {}) {
     lines.push("Scout notes:");
     for (const scout of task.scouts) {
       lines.push("");
-      lines.push(`Scout: ${scout.role}`);
+      lines.push(`Scout: ${workerLabelFor(scout) ?? "unknown"}`);
       lines.push(`Status: ${scout.status}`);
       lines.push(scout.notes ?? "No scout notes recorded.");
     }
@@ -1900,7 +1857,8 @@ export function renderResult(config, workspaceRoot, taskId = null, options = {})
 }
 
 function candidateMatches(candidate, requested) {
-  return candidate.candidateId === requested || candidate.role === requested || candidate.candidateId.endsWith(`-${requested}`);
+  const label = candidateWorkerLabel(candidate);
+  return candidate.candidateId === requested || label === requested || candidate.candidateId.endsWith(`-${requested}`);
 }
 
 function findCandidate(task, requested) {

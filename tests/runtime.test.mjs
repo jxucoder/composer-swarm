@@ -8,7 +8,7 @@ import test from "node:test";
 import {
   applyCandidate,
   buildCursorAgentArgs,
-  buildRolePrompt,
+  buildWorkerPrompt,
   cleanupTask,
   createResearchTask,
   createReviewTask,
@@ -22,7 +22,7 @@ import {
   loadConfig,
   loadTask,
   planTask,
-  researchRoles,
+  researchWorkerLabels,
   renderResult,
   renderStatus,
   resolveWorkspaceContext,
@@ -64,22 +64,22 @@ import path from "node:path";
 const args = process.argv.slice(2);
 const workspace = args[args.indexOf("--workspace") + 1];
 const prompt = args[args.length - 1];
-const role = /Role: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
-fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, workspace, role }) + "\\n", "utf8");
+const workerLabel = /Worker label: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, workspace, workerLabel }) + "\\n", "utf8");
 
-if (role === "builder-a") {
+if (workerLabel === "builder-a") {
   fs.writeFileSync(path.join(workspace, "src", "app.txt"), "builder-a\\n", "utf8");
 }
-if (role === "builder-b") {
+if (workerLabel === "builder-b") {
   fs.writeFileSync(path.join(workspace, "src", "new.txt"), "builder-b\\n", "utf8");
 }
 
 console.log(JSON.stringify({ type: "input", text: prompt }));
-console.log(JSON.stringify({ type: "progress", text: role + " progress" }));
-if (role === "reviewer") {
+console.log(JSON.stringify({ type: "progress", text: workerLabel + " progress" }));
+if (workerLabel === "reviewer") {
   console.log(JSON.stringify({ type: "final", text: "Recommend builder-a. builder-a is the best candidate with fewer risks." }));
 } else {
-  console.log(JSON.stringify({ type: "final", text: role + " done" }));
+  console.log(JSON.stringify({ type: "final", text: workerLabel + " done" }));
 }
 `,
     "utf8"
@@ -98,14 +98,14 @@ function makeCancellingReviewerAgent(repo, taskId) {
 import fs from "node:fs";
 
 const prompt = process.argv.at(-1);
-const role = /Role: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
-if (role === "reviewer") {
+const workerLabel = /Worker label: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
+if (workerLabel === "reviewer") {
   const task = JSON.parse(fs.readFileSync(${JSON.stringify(taskFile)}, "utf8"));
   task.status = "cancelled";
   task.cancelledAt = "2026-05-23T00:00:00.000Z";
   fs.writeFileSync(${JSON.stringify(taskFile)}, JSON.stringify(task, null, 2) + "\\n", "utf8");
 }
-console.log(JSON.stringify({ type: "final", text: role + " done" }));
+console.log(JSON.stringify({ type: "final", text: workerLabel + " done" }));
 `,
     "utf8"
   );
@@ -126,22 +126,22 @@ import path from "node:path";
 const args = process.argv.slice(2);
 const workspace = args[args.indexOf("--workspace") + 1];
 const prompt = args[args.length - 1];
-const role = /Role: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
+const workerLabel = /Worker label: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
 
-if (role === "builder-b" && !fs.existsSync(${JSON.stringify(markerPath)})) {
+if (workerLabel === "builder-b" && !fs.existsSync(${JSON.stringify(markerPath)})) {
   fs.writeFileSync(${JSON.stringify(markerPath)}, "failed once\\n", "utf8");
   console.error("Error: ENOENT: no such file or directory, rename '/Users/test/.cursor/cli-config.json.tmp' -> '/Users/test/.cursor/cli-config.json'");
   process.exit(1);
 }
 
-if (role === "builder-a") {
+if (workerLabel === "builder-a") {
   fs.writeFileSync(path.join(workspace, "src", "app.txt"), "builder-a\\n", "utf8");
 }
-if (role === "builder-b") {
+if (workerLabel === "builder-b") {
   fs.writeFileSync(path.join(workspace, "src", "retry.txt"), "builder-b retry\\n", "utf8");
 }
 
-console.log(JSON.stringify({ type: "final", text: role === "reviewer" ? "Recommend builder-b." : role + " done" }));
+console.log(JSON.stringify({ type: "final", text: workerLabel === "reviewer" ? "Recommend builder-b." : workerLabel + " done" }));
 `,
     "utf8"
   );
@@ -163,23 +163,26 @@ function configWithCursor(command) {
   };
 }
 
-test("plans default worker phases without user-configured roles", () => {
+test("plans default worker labels without defined roles", () => {
   const plan = planTask(defaultConfig(), "ship the feature");
   assert.equal(plan.workers.length, 4);
-  assert.equal(plan.workers[0].phase, "planner");
-  assert.equal(plan.workers[1].phase, "builder-a");
-  assert.equal(plan.workers[2].phase, "builder-b");
-  assert.equal(plan.workers[3].phase, "reviewer");
+  assert.equal(plan.workers[0].label, "planner");
+  assert.equal(plan.workers[1].label, "builder-a");
+  assert.equal(plan.workers[2].label, "builder-b");
+  assert.equal(plan.workers[3].label, "reviewer");
   assert.equal("agentId" in plan.workers[1], false);
+  assert.equal("objective" in plan.workers[1], false);
+  assert.equal("roles" in plan, false);
 });
 
-test("formats plan with objective and worker phases", () => {
+test("formats plan with objective and worker passes", () => {
   const text = formatPlan(planTask(defaultConfig(), "fix tests", { builders: 1 }));
   assert.match(text, /Objective: fix tests/);
-  assert.match(text, /Execution plan:/);
+  assert.match(text, /Worker passes:/);
   assert.match(text, /implementation pass A \(can edit\)/);
   assert.match(text, /review pass \(read-only\)/);
   assert.doesNotMatch(text, /composer-builder-a/);
+  assert.doesNotMatch(text, /Produce the smallest direct implementation/);
 });
 
 test("doctor reports configured workers", () => {
@@ -192,7 +195,7 @@ test("doctor reports configured workers", () => {
   assert.match(report.lines.join("\n"), /verifier: ok/);
 });
 
-test("legacy agent configs still load without exposing default roles", () => {
+test("legacy agent configs still load without exposing default worker catalogs", () => {
   const repo = makeRepo();
   fs.mkdirSync(path.join(repo, ".composer-swarm"));
   fs.writeFileSync(
@@ -235,12 +238,12 @@ test("legacy agent configs still load without exposing default roles", () => {
   assert.equal(report.ok, true);
   assert.match(report.lines.join("\n"), /composer: ok/);
   const task = createTeamTask(config, repo, "legacy config task", { builders: 1, taskId: "task_legacy" });
-  assert.equal(task.workers.find((worker) => worker.role === "builder-a").agentId, "legacy-builder");
+  assert.equal(task.workers.find((worker) => worker.label === "builder-a").agentId, "legacy-builder");
 });
 
-test("cursor-agent args use stream-json, workspace, model, and plan mode for non-editing roles", () => {
+test("cursor-agent args use stream-json, workspace, model, and plan mode for read-only labels", () => {
   const args = buildCursorAgentArgs({
-    role: "reviewer",
+    workerLabel: "reviewer",
     worktree: "/tmp/worktree",
     prompt: "review this",
     model: "test-model"
@@ -250,13 +253,13 @@ test("cursor-agent args use stream-json, workspace, model, and plan mode for non
   assert.deepEqual(args.slice(5, 7), ["--model", "test-model"]);
   assert.equal(args.at(-1), "review this");
 
-  const builderArgs = buildCursorAgentArgs({ role: "builder-a", worktree: "/tmp/w", prompt: "build" });
+  const builderArgs = buildCursorAgentArgs({ workerLabel: "builder-a", worktree: "/tmp/w", prompt: "build" });
   assert.equal(builderArgs.includes("--mode=plan"), false);
 
-  const scoutArgs = buildCursorAgentArgs({ role: "scout-a", worktree: "/tmp/w", prompt: "inspect" });
+  const scoutArgs = buildCursorAgentArgs({ workerLabel: "scout-a", worktree: "/tmp/w", prompt: "inspect" });
   assert.equal(scoutArgs.includes("--mode=plan"), true);
 
-  const researchArgs = buildCursorAgentArgs({ role: "research-a", worktree: "/tmp/w", prompt: "research" });
+  const researchArgs = buildCursorAgentArgs({ workerLabel: "research-a", worktree: "/tmp/w", prompt: "research" });
   assert.equal(researchArgs.includes("--mode=plan"), true);
 });
 
@@ -276,33 +279,33 @@ test("Composer workers are pinned to Composer 2.5 Fast", () => {
   assert.throws(() => createTeamTask(config, repo, "wrong model", { model: "auto" }), /composer-2\.5-fast/);
 });
 
-test("role prompts include objective, role, planner output, and candidate context", () => {
+test("worker prompts include objective, label, planner output, and candidate context", () => {
   const task = { taskId: "task_test", objective: "fix checkout", baseSha: "abc123" };
-  const builderPrompt = buildRolePrompt("builder-a", task, { plannerOutput: "touch src/checkout.js" });
-  assert.match(builderPrompt, /Role: builder-a/);
+  const builderPrompt = buildWorkerPrompt("builder-a", task, { plannerOutput: "touch src/checkout.js" });
+  assert.match(builderPrompt, /Worker label: builder-a/);
   assert.match(builderPrompt, /Objective: fix checkout/);
   assert.match(builderPrompt, /touch src\/checkout.js/);
 
-  const reviewerPrompt = buildRolePrompt("reviewer", task, { candidateText: "Candidate A patch" });
+  const reviewerPrompt = buildWorkerPrompt("reviewer", task, { candidateText: "Candidate A patch" });
   assert.match(reviewerPrompt, /Candidate A patch/);
   assert.match(reviewerPrompt, /Do not choose for the user/);
 
-  const reviewOnlyPrompt = buildRolePrompt("reviewer", { ...task, options: { review: true } });
-  assert.match(reviewOnlyPrompt, /Repository review task/);
+  const reviewOnlyPrompt = buildWorkerPrompt("reviewer", { ...task, options: { review: true } });
+  assert.match(reviewOnlyPrompt, /Repository review pass/);
   assert.match(reviewOnlyPrompt, /Scout notes/);
   assert.doesNotMatch(reviewOnlyPrompt, /Candidate patches to review/);
 
-  const reviewPlannerPrompt = buildRolePrompt("planner", { ...task, options: { review: true } });
-  assert.match(reviewPlannerPrompt, /Review planning task/);
+  const reviewPlannerPrompt = buildWorkerPrompt("planner", { ...task, options: { review: true } });
+  assert.match(reviewPlannerPrompt, /Review planning pass/);
   assert.doesNotMatch(reviewPlannerPrompt, /implementation plan for the builders/);
 
-  const scoutPrompt = buildRolePrompt("scout-a", { ...task, options: { review: true } }, { plannerOutput: "inspect runtime" });
-  assert.match(scoutPrompt, /Scout task/);
+  const scoutPrompt = buildWorkerPrompt("scout-a", { ...task, options: { review: true } }, { plannerOutput: "inspect runtime" });
+  assert.match(scoutPrompt, /Scout pass/);
   assert.match(scoutPrompt, /Do not edit files/);
   assert.match(scoutPrompt, /inspect runtime/);
 
-  const researchPrompt = buildRolePrompt("research-a", { ...task, options: { research: true, focus: "architecture" } });
-  assert.match(researchPrompt, /Research task/);
+  const researchPrompt = buildWorkerPrompt("research-a", { ...task, options: { research: true, focus: "architecture" } });
+  assert.match(researchPrompt, /Research pass/);
   assert.match(researchPrompt, /Do not edit files/);
   assert.match(researchPrompt, /Required output format/);
   assert.match(researchPrompt, /Requested focus: architecture/);
@@ -321,8 +324,8 @@ test("workflow creates worktrees, records transcripts, captures modified and new
   assert.equal(stored.candidates.length, 2);
   assert.equal(stored.reviewer.status, "completed");
 
-  const candidateA = stored.candidates.find((candidate) => candidate.role === "builder-a");
-  const candidateB = stored.candidates.find((candidate) => candidate.role === "builder-b");
+  const candidateA = stored.candidates.find((candidate) => candidate.workerLabel === "builder-a");
+  const candidateB = stored.candidates.find((candidate) => candidate.workerLabel === "builder-b");
   assert.ok(candidateA.patchFile);
   assert.ok(candidateB.patchFile);
   assert.match(fs.readFileSync(candidateA.patchFile, "utf8"), /builder-a/);
@@ -331,8 +334,8 @@ test("workflow creates worktrees, records transcripts, captures modified and new
   assert.deepEqual(candidateB.changedFiles, ["src/new.txt"]);
 
   for (const worker of stored.workers) {
-    assert.ok(fs.existsSync(worker.worktree), `${worker.role} worktree should exist`);
-    assert.ok(fs.existsSync(worker.transcript), `${worker.role} transcript should exist`);
+    assert.ok(fs.existsSync(worker.worktree), `${worker.label} worktree should exist`);
+    assert.ok(fs.existsSync(worker.transcript), `${worker.label} transcript should exist`);
   }
 
   const invocations = fs
@@ -341,9 +344,9 @@ test("workflow creates worktrees, records transcripts, captures modified and new
     .split(/\n/)
     .map((line) => JSON.parse(line));
   assert.equal(invocations.length, 4);
-  assert.equal(invocations.find((entry) => entry.role === "planner").args.includes("--mode=plan"), true);
-  assert.equal(invocations.find((entry) => entry.role === "reviewer").args.includes("--mode=plan"), true);
-  assert.equal(invocations.find((entry) => entry.role === "builder-a").args.includes("--mode=plan"), false);
+  assert.equal(invocations.find((entry) => entry.workerLabel === "planner").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.workerLabel === "reviewer").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.workerLabel === "builder-a").args.includes("--mode=plan"), false);
 
   const resultText = renderResult(config, repo, task.taskId);
   assert.match(resultText, /Candidate: task_test-builder-a/);
@@ -381,8 +384,8 @@ test("workflow retries the transient Cursor config rename race", async () => {
   await runTaskWorkflow(config, repo, task.taskId);
 
   const stored = loadTask(config, repo, task.taskId);
-  const builderB = stored.workers.find((worker) => worker.role === "builder-b");
-  const candidateB = stored.candidates.find((candidate) => candidate.role === "builder-b");
+  const builderB = stored.workers.find((worker) => worker.label === "builder-b");
+  const candidateB = stored.candidates.find((candidate) => candidate.workerLabel === "builder-b");
   assert.equal(stored.status, "completed");
   assert.equal(builderB.status, "completed");
   assert.ok(candidateB.patchFile);
@@ -404,7 +407,7 @@ test("review workflow can fan out to read-only scouts", async () => {
   assert.equal(stored.options.scouts, 2);
   assert.equal(stored.candidates.length, 0);
   assert.deepEqual(
-    stored.scouts.map((scout) => scout.role),
+    stored.scouts.map((scout) => scout.worker),
     ["scout-a", "scout-b"]
   );
   assert.match(stored.reviewer.notes, /Recommend builder-a/);
@@ -415,8 +418,8 @@ test("review workflow can fan out to read-only scouts", async () => {
     .split(/\n/)
     .map((line) => JSON.parse(line));
   assert.equal(invocations.length, 4);
-  assert.equal(invocations.find((entry) => entry.role === "scout-a").args.includes("--mode=plan"), true);
-  assert.equal(invocations.find((entry) => entry.role === "scout-b").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.workerLabel === "scout-a").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.workerLabel === "scout-b").args.includes("--mode=plan"), true);
 
   const resultText = renderResult(config, repo, task.taskId, { verbose: true });
   assert.match(resultText, /Scout notes:/);
@@ -443,10 +446,10 @@ test("research workflow runs read-only workers without candidates or clean-check
   assert.equal(stored.candidates.length, 0);
   assert.equal(stored.reviewer, null);
   assert.deepEqual(
-    stored.workers.map((worker) => worker.role),
+    stored.workers.map((worker) => worker.label),
     ["research-a", "research-b"]
   );
-  assert.deepEqual(researchRoles(2), ["research-a", "research-b"]);
+  assert.deepEqual(researchWorkerLabels(2), ["research-a", "research-b"]);
   assert.equal(stored.research.length, 2);
 
   const invocations = fs
@@ -455,8 +458,8 @@ test("research workflow runs read-only workers without candidates or clean-check
     .split(/\n/)
     .map((line) => JSON.parse(line));
   assert.equal(invocations.length, 2);
-  assert.equal(invocations.find((entry) => entry.role === "research-a").args.includes("--mode=plan"), true);
-  assert.equal(invocations.find((entry) => entry.role === "research-b").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.workerLabel === "research-a").args.includes("--mode=plan"), true);
+  assert.equal(invocations.find((entry) => entry.workerLabel === "research-b").args.includes("--mode=plan"), true);
 
   const resultText = renderResult(config, repo, task.taskId, { verbose: true });
   assert.match(resultText, /Research question: map config loading/);
@@ -558,10 +561,10 @@ test("createReviewTask can add read-only scout workers", () => {
   assert.equal(task.options.review, true);
   assert.equal(task.options.scouts, 2);
   assert.deepEqual(
-    task.workers.map((worker) => worker.role),
+    task.workers.map((worker) => worker.label),
     ["planner", "scout-a", "scout-b", "reviewer"]
   );
-  assert.equal(task.workers.find((worker) => worker.role === "scout-a").canEdit, false);
+  assert.equal(task.workers.find((worker) => worker.label === "scout-a").canEdit, false);
   assert.throws(() => createReviewTask(config, repo, "tests", { scouts: 5 }), /requires 0 to 4 scouts/);
 });
 
@@ -572,7 +575,7 @@ test("createResearchTask validates worker count", () => {
   assert.equal(task.options.research, true);
   assert.equal(task.options.workers, 3);
   assert.deepEqual(
-    task.workers.map((worker) => worker.role),
+    task.workers.map((worker) => worker.label),
     ["research-a", "research-b", "research-c"]
   );
   assert.equal(task.workers.some((worker) => worker.canEdit), false);
@@ -629,7 +632,7 @@ test("verifyCandidate runs shell checks and classifies baseline failures", async
   assert.equal(result.check.classification, "baseline");
 
   const stored = loadTask(config, repo, task.taskId);
-  const candidate = stored.candidates.find((entry) => entry.role === "builder-a");
+  const candidate = stored.candidates.find((entry) => entry.workerLabel === "builder-a");
   assert.equal(candidate.checks.length, 1);
   assert.equal(candidate.checks[0].classification, "baseline");
 });
@@ -650,8 +653,8 @@ test("formatCandidateComparison summarizes patch size and checks", async () => {
 test("extractRecommendedCandidate parses reviewer notes", () => {
   const task = {
     candidates: [
-      { candidateId: "t-builder-a", role: "builder-a", patchFile: "/a.patch", status: "completed" },
-      { candidateId: "t-builder-b", role: "builder-b", patchFile: "/b.patch", status: "completed" }
+      { candidateId: "t-builder-a", workerLabel: "builder-a", patchFile: "/a.patch", status: "completed" },
+      { candidateId: "t-builder-b", workerLabel: "builder-b", patchFile: "/b.patch", status: "completed" }
     ],
     reviewer: { notes: "I recommend builder-a for this task." }
   };

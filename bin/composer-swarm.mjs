@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { normalizeArgs, splitRawArgumentString } from "../src/args.mjs";
 import {
   applyCandidate,
-  builderRoles,
+  builderWorkerLabels,
   cancelTask,
   cleanupTasks,
   createResearchTask,
@@ -21,11 +21,11 @@ import {
   recordBackgroundPid,
   renderResult,
   renderStatus,
-  researchRoles,
+  researchWorkerLabels,
   reviewObjective,
   runDoctor,
   runTaskWorkflow,
-  scoutRoles,
+  scoutWorkerLabels,
   verifyCandidate,
   verifyCandidates,
   workspaceConfigFile,
@@ -185,12 +185,12 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
   const isReview = Boolean(options.review);
   const builders = isReview ? 0 : options.builders ? Number(options.builders) : 2;
   const scouts = isReview ? (options.scouts ? Number(options.scouts) : 0) : 0;
-  if (!isReview && (!Number.isInteger(builders) || builders < 1 || builders > builderRoles(99).length)) {
+  if (!isReview && (!Number.isInteger(builders) || builders < 1 || builders > builderWorkerLabels(99).length)) {
     console.error("Invalid --builders value. Use an integer from 1 to 4.");
     process.exitCode = 2;
     return null;
   }
-  if (isReview && (!Number.isInteger(scouts) || scouts < 0 || scouts > scoutRoles(99).length)) {
+  if (isReview && (!Number.isInteger(scouts) || scouts < 0 || scouts > scoutWorkerLabels(99).length)) {
     console.error("Invalid --scouts value. Use an integer from 0 to 4.");
     process.exitCode = 2;
     return null;
@@ -225,7 +225,7 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
 
 async function runResearchCommand(config, workspaceRoot, question, options) {
   const workers = options.workers ? Number(options.workers) : 2;
-  if (!Number.isInteger(workers) || workers < 1 || workers > researchRoles(99).length) {
+  if (!Number.isInteger(workers) || workers < 1 || workers > researchWorkerLabels(99).length) {
     console.error("Invalid --workers value. Use an integer from 1 to 4.");
     process.exitCode = 2;
     return null;

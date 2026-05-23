@@ -53,7 +53,7 @@ Top-level fields:
 
 - `distribution.userPromise`, `primaryHosts`, and `defaultWorkerKind` are shown in `doctor` output but are
   not otherwise enforced.
-- The runtime chooses the internal worker phases from `team --builders` or `review --scouts`.
+- The runtime chooses internal worker labels from `team --builders`, `review --scouts`, or `research --workers`.
 - Existing legacy configs with an `agents` array are still accepted, but new configs should not use it.
 
 **Ignored if present:**
