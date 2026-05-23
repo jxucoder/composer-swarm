@@ -100,15 +100,7 @@ export function defaultConfig() {
         args: ["-lc", "npm test"],
         canEdit: false
       }
-    ],
-    policies: {
-      worktreeIsolation: true,
-      manualApplyRequired: true,
-      maxComposerWorkers: 4,
-      leaseTtlSeconds: 600,
-      requireReviewBeforeComplete: true,
-      defaultNetwork: false
-    }
+    ]
   };
 }
 
@@ -165,16 +157,13 @@ export function loadConfig(cwd) {
   }
   const base = defaultConfig();
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const { policies: _unusedPolicies, ...parsedConfig } = parsed;
   return {
     ...base,
-    ...parsed,
+    ...parsedConfig,
     swarm: {
       ...base.swarm,
       ...(parsed.swarm ?? {})
-    },
-    policies: {
-      ...base.policies,
-      ...(parsed.policies ?? {})
     },
     distribution: {
       ...base.distribution,
@@ -1205,6 +1194,9 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       notes: reviewer.finalOutput || "(reviewer did not provide notes)",
       exitCode: reviewer.exitCode ?? null
     };
+    if (isCancelled(config, workspaceRoot, task.taskId)) {
+      return markCancelled(config, workspaceRoot, task);
+    }
     task.recommendedCandidateId = extractRecommendedCandidate(task);
     task.status = task.workers.some((worker) => worker.status === "failed") ? "failed" : "completed";
     task.completedAt = new Date().toISOString();
@@ -1723,22 +1715,32 @@ export function applyCandidate(config, workspaceRoot, taskId, requestedCandidate
   };
 }
 
-function killPid(pid) {
+function killPid(pid, options = {}) {
   if (!pid) {
     return false;
   }
+  let killed = false;
+  if (options.processGroup && process.platform !== "win32") {
+    try {
+      process.kill(-pid, "SIGTERM");
+      killed = true;
+    } catch {
+      // Fall back to signalling the single PID below.
+    }
+  }
   try {
     process.kill(pid, "SIGTERM");
-    return true;
+    killed = true;
   } catch {
-    return false;
+    // The process may already have exited, or the PID may be stale.
   }
+  return killed;
 }
 
 export function cancelTask(config, workspaceRoot, taskId) {
   const task = loadTask(config, workspaceRoot, taskId);
   const killed = [];
-  if (killPid(task.backgroundPid)) {
+  if (killPid(task.backgroundPid, { processGroup: true })) {
     killed.push(task.backgroundPid);
   }
   delete task.backgroundPid;

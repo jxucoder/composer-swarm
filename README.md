@@ -17,7 +17,7 @@ control of judgment and apply.
 
 ## Requirements
 
-- Node.js 18.18 or later
+- Node.js 20 or later
 - git
 - authenticated `cursor-agent` on `PATH`
 - a clean tracked git checkout before starting an implementation team

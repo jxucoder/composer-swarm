@@ -28,7 +28,6 @@ import {
   runDoctor,
   runTaskWorkflow,
   saveTask,
-  scoutRoles,
   verifyCandidate,
   writeDefaultConfig
 } from "../src/runtime.mjs";
@@ -86,27 +85,43 @@ if (role === "reviewer") {
   return { scriptPath, logPath };
 }
 
+function makeCancellingReviewerAgent(repo, taskId) {
+  const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-swarm-cancel-"));
+  const scriptPath = path.join(fakeDir, "fake-cancelling-cursor-agent.mjs");
+  const taskFile = path.join(repo, ".composer-swarm", "state", "tasks", `${taskId}.json`);
+  fs.writeFileSync(
+    scriptPath,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+
+const prompt = process.argv.at(-1);
+const role = /Role: ([^\\n]+)/.exec(prompt)?.[1] ?? "unknown";
+if (role === "reviewer") {
+  const task = JSON.parse(fs.readFileSync(${JSON.stringify(taskFile)}, "utf8"));
+  task.status = "cancelled";
+  task.cancelledAt = "2026-05-23T00:00:00.000Z";
+  fs.writeFileSync(${JSON.stringify(taskFile)}, JSON.stringify(task, null, 2) + "\\n", "utf8");
+}
+console.log(JSON.stringify({ type: "final", text: role + " done" }));
+`,
+    "utf8"
+  );
+  fs.chmodSync(scriptPath, 0o755);
+  return { scriptPath };
+}
+
 function configWithCursor(command) {
   const config = defaultConfig();
   return {
     ...config,
-    agents: [
-      ...config.agents.map((agent) =>
-        agent.kind === "cursor-cli"
-          ? {
-              ...agent,
-              command
-            }
-          : agent
-      ),
-      ...scoutRoles(4).map((role) => ({
-        id: `composer-${role}`,
-        kind: "cursor-cli",
-        role,
-        command,
-        canEdit: false
-      }))
-    ]
+    agents: config.agents.map((agent) =>
+      agent.kind === "cursor-cli"
+        ? {
+            ...agent,
+            command
+          }
+        : agent
+    )
   };
 }
 
@@ -158,6 +173,7 @@ test("cursor-agent args use stream-json, workspace, model, and plan mode for non
 test("Composer workers are pinned to Composer 2.5 Fast", () => {
   const config = defaultConfig();
   assert.equal(config.distribution.defaultWorkerModel, DEFAULT_CURSOR_MODEL);
+  assert.equal("policies" in config, false);
   assert.equal(resolveCursorModel(config), DEFAULT_CURSOR_MODEL);
   assert.equal(resolveCursorModel(config, DEFAULT_CURSOR_MODEL), DEFAULT_CURSOR_MODEL);
   assert.throws(() => resolveCursorModel(config, "auto"), /composer-2\.5-fast/);
@@ -239,6 +255,20 @@ test("workflow creates worktrees, records transcripts, captures modified and new
   assert.doesNotMatch(resultText, /You are a Composer worker/);
   assert.match(renderStatus(config, repo, task.taskId), /Status: completed/);
   assert.match(renderStatus(config, repo, task.taskId), /Next steps:/);
+});
+
+test("workflow does not overwrite a cancellation after reviewer finishes", async () => {
+  const repo = makeRepo();
+  const taskId = "task_cancel_after_review";
+  const fake = makeCancellingReviewerAgent(repo, taskId);
+  const config = configWithCursor(fake.scriptPath);
+  const task = createTeamTask(config, repo, "cancel during review", { builders: 1, taskId });
+
+  await runTaskWorkflow(config, repo, task.taskId);
+
+  const stored = loadTask(config, repo, task.taskId);
+  assert.equal(stored.status, "cancelled");
+  assert.equal(stored.reviewer.status, "cancelled");
 });
 
 test("review workflow can fan out to read-only scouts", async () => {

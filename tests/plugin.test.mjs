@@ -144,8 +144,13 @@ test("release packaging excludes local generated state and reference checkouts",
   const npmignore = read(".npmignore");
   for (const pattern of [".composer-swarm/state/", "node_modules/", "repos/", "*.tgz"]) {
     assert.match(gitignore, new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const pattern of [".composer-swarm/", "node_modules/", "repos/", "*.tgz"]) {
     assert.match(npmignore, new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+  const exampleConfig = JSON.parse(read("swarm.config.example.json"));
+  assert.equal(exampleConfig.distribution.defaultWorkerModel, "composer-2.5-fast");
+  assert.equal("policies" in exampleConfig, false);
   assert.ok(fs.existsSync(path.join(ROOT, ".github", "workflows", "ci.yml")), "GitHub CI workflow should exist");
   assert.ok(
     fs.statSync(path.join(ROOT, "bin", "composer-swarm.mjs")).mode & 0o111,

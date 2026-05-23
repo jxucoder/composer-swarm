@@ -1,4 +1,4 @@
-.composer-swarm/state/
+.composer-swarm/
 node_modules/
 repos/
 *.tgz

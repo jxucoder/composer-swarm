@@ -8,7 +8,8 @@
   "distribution": {
     "userPromise": "Add a team of Composer workers to the coding agent you already use.",
     "primaryHosts": ["claude-code", "codex"],
-    "defaultWorkerKind": "cursor-cli"
+    "defaultWorkerKind": "cursor-cli",
+    "defaultWorkerModel": "composer-2.5-fast"
   },
   "agents": [
     {
@@ -82,13 +83,5 @@
       "args": ["-lc", "npm test"],
       "canEdit": false
     }
-  ],
-  "policies": {
-    "worktreeIsolation": true,
-    "manualApplyRequired": true,
-    "maxComposerWorkers": 4,
-    "leaseTtlSeconds": 600,
-    "requireReviewBeforeComplete": true,
-    "defaultNetwork": false
-  }
+  ]
 }

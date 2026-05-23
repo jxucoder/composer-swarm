@@ -119,13 +119,5 @@
       ],
       "canEdit": false
     }
-  ],
-  "policies": {
-    "worktreeIsolation": true,
-    "manualApplyRequired": true,
-    "maxComposerWorkers": 4,
-    "leaseTtlSeconds": 600,
-    "requireReviewBeforeComplete": true,
-    "defaultNetwork": false
-  }
+  ]
 }

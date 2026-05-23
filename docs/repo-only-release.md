@@ -19,7 +19,7 @@ alias composer-swarm='node /path/to/composer-swarm/bin/composer-swarm.mjs'
 
 ## Prerequisites
 
-- Node 18.18+
+- Node 20+
 - git
 - authenticated `cursor-agent`
 - Cursor model `composer-2.5-fast` for all Composer workers
