@@ -18,7 +18,7 @@ Core constraints:
 
 Execution mode rules:
 - If the raw arguments include `--wait`, run in the foreground.
-- If the raw arguments include `--background`, start the task in the background.
+- If the raw arguments include `--background`, run the command in a Claude background task.
 - Otherwise, estimate task size before asking:
   - Run `git status --short --untracked-files=all`.
   - If the request sounds broad, multi-step, or touches more than a trivial change, recommend background.
@@ -27,26 +27,33 @@ Execution mode rules:
   - `Run in background`
   - `Wait for results`
 
-When the user already supplied `--wait` or `--background`, preserve the arguments exactly:
+Argument handling:
+- Preserve the user's arguments exactly.
+- Do not strip `--wait` or `--background` yourself.
+- Do not add extra task instructions or rewrite the user's intent.
+
+Foreground flow:
+- Run:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" team "$ARGUMENTS"
 ```
 
-Otherwise append the chosen mode as a separate CLI flag after the raw arguments.
-
-Foreground flow:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" team "$ARGUMENTS" --wait
-```
+- Return stdout and stderr without summarizing or rewriting.
+- Do not apply any candidate patch.
 
 Background flow:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" team "$ARGUMENTS" --background
+- Launch the task with `Bash` in the background:
+```typescript
+Bash({
+  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" team "$ARGUMENTS"`,
+  description: "Composer Swarm team",
+  run_in_background: true
+})
 ```
-
-Composer Swarm uses CLI `--background` to spawn a detached Node runner and record its PID. This keeps background tasks observable through `/composer:status` and `/composer:result` without relying on host-specific background Bash APIs.
+- Do not call `BashOutput` or wait for completion in this turn.
+- After launching the command, tell the user: "Composer Swarm started in the background. Check `/composer:status` for progress."
 
 Output rules:
-- Present stdout and stderr without summarizing or rewriting.
+- Present foreground stdout and stderr without summarizing or rewriting.
 - If background mode starts successfully, tell the user to check `/composer:status` and `/composer:result`.

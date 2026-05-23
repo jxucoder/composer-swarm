@@ -72,7 +72,8 @@ Commands:
 /composer:cancel <task-id>
 ```
 
-The command files are thin wrappers. They return CLI output directly.
+The command files are thin wrappers. Foreground commands return CLI output directly; background commands use
+Claude Code's background task support and preserve raw `$ARGUMENTS`.
 
 ## Codex Plugin And Skill
 

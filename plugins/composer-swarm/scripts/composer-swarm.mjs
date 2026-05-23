@@ -2,8 +2,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+
+import { normalizePluginArgv } from "./lib/args.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
@@ -13,25 +15,35 @@ const repoRoot = process.env.COMPOSER_SWARM_REPO
   ? path.resolve(process.env.COMPOSER_SWARM_REPO)
   : path.resolve(pluginRoot, "../..");
 const cliPath = path.join(repoRoot, "bin", "composer-swarm.mjs");
-const argsPath = path.join(repoRoot, "src", "args.mjs");
 
-if (!fs.existsSync(cliPath) || !fs.existsSync(argsPath)) {
-  process.stderr.write(
-    `composer-swarm plugin could not find the repo runtime at ${repoRoot}.\n` +
-      "If the plugin was copied outside the checkout, set COMPOSER_SWARM_REPO=/path/to/composer-swarm.\n"
-  );
-  process.exit(1);
+function cliCommand() {
+  if (fs.existsSync(cliPath)) {
+    return {
+      command: process.execPath,
+      args: [cliPath]
+    };
+  }
+  return {
+    command: "composer-swarm",
+    args: []
+  };
 }
-
-const { normalizePluginArgv } = await import(pathToFileURL(argsPath).href);
 
 const [command, ...rawArgs] = process.argv.slice(2);
 const args = normalizePluginArgv(rawArgs);
-const result = spawnSync(process.execPath, [cliPath, command, ...args], {
+const cli = cliCommand();
+const result = spawnSync(cli.command, [...cli.args, command, ...args], {
   cwd: process.cwd(),
   encoding: "utf8",
   stdio: ["ignore", "pipe", "pipe"]
 });
+
+if (result.error) {
+  process.stderr.write(
+    `composer-swarm plugin could not find the CLI runtime. Install composer-swarm on PATH or set COMPOSER_SWARM_REPO=/path/to/composer-swarm.\n`
+  );
+  process.exit(1);
+}
 
 if (result.stdout) {
   process.stdout.write(result.stdout);

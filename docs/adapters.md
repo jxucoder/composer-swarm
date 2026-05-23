@@ -41,8 +41,12 @@ The command files should be thin, similar to `codex-plugin-cc`:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" team "$ARGUMENTS"
 ```
 
+Foreground commands return CLI output verbatim. Background commands should use the host's background task
+primitive and preserve `$ARGUMENTS` exactly instead of rewriting flags in the command markdown.
+
 If the plugin directory is copied outside this checkout, set `COMPOSER_SWARM_REPO` to the cloned
-composer-swarm repository so the wrapper can reach `bin/composer-swarm.mjs` and shared runtime code.
+composer-swarm repository so the wrapper can reach `bin/composer-swarm.mjs`; otherwise the wrapper falls
+back to a `composer-swarm` executable on `PATH`.
 
 If Agent Teams are enabled, Claude teammates can still use `/composer:*` commands, but Composer workers
 remain CLI-backed workers, not native Claude teammates.

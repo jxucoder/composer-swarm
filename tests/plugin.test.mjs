@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { normalizeArgv, normalizePluginArgv, splitRawArgumentString } from "../src/args.mjs";
+import { normalizePluginArgv as normalizePackagedPluginArgv } from "../plugins/composer-swarm/scripts/lib/args.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = path.join(ROOT, "bin", "composer-swarm.mjs");
@@ -57,11 +58,12 @@ test("Claude Code command files preserve plugin UX and quote raw arguments", () 
   assert.match(team, /Run in background/);
   assert.match(team, /Wait for results/);
   assert.match(team, /\(Recommended\)/);
-  assert.match(team, /team "\$ARGUMENTS" --wait/);
-  assert.match(team, /team "\$ARGUMENTS" --background/);
   assert.match(team, /team "\$ARGUMENTS"\n/);
   assert.match(team, /Do not apply any candidate patch/);
-  assert.match(team, /CLI `--background`/);
+  assert.match(team, /Preserve the user's arguments exactly/);
+  assert.match(team, /run_in_background: true/);
+  assert.match(team, /Bash\(\{/);
+  assert.doesNotMatch(team, /team "\$ARGUMENTS" --(?:wait|background)/);
   assert.match(team, /composer-2\.5-fast/);
   assert.doesNotMatch(team, /--model <model>/);
 
@@ -69,8 +71,11 @@ test("Claude Code command files preserve plugin UX and quote raw arguments", () 
   assert.match(review, /review-only/i);
   assert.match(review, /AskUserQuestion/);
   assert.match(review, /Do not fix issues/i);
-  assert.match(review, /review "\$ARGUMENTS" --wait/);
-  assert.match(review, /review "\$ARGUMENTS" --background/);
+  assert.match(review, /review "\$ARGUMENTS"\n/);
+  assert.match(review, /Preserve the user's arguments exactly/);
+  assert.match(review, /run_in_background: true/);
+  assert.match(review, /Bash\(\{/);
+  assert.doesNotMatch(review, /review "\$ARGUMENTS" --(?:wait|background)/);
   assert.match(review, /composer-2\.5-fast/);
   assert.doesNotMatch(review, /--model <model>/);
 
@@ -165,6 +170,13 @@ test("splitRawArgumentString and normalizeArgv handle quoted slash-command args"
     "--wait"
   ]);
   assert.deepEqual(normalizePluginArgv(['fix "quoted task" --roles reviewer', "--wait"]), [
+    "fix",
+    "quoted task",
+    "--roles",
+    "reviewer",
+    "--wait"
+  ]);
+  assert.deepEqual(normalizePackagedPluginArgv(['fix "quoted task" --roles reviewer', "--wait"]), [
     "fix",
     "quoted task",
     "--roles",

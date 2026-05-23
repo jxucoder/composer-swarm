@@ -46,7 +46,8 @@ Then run:
 /composer:verify <task-id>
 ```
 
-If your Claude Code install copies the plugin directory instead of using it in place, set:
+If your Claude Code install copies the plugin directory instead of using it in place, either put
+`composer-swarm` on `PATH` or set:
 
 ```bash
 export COMPOSER_SWARM_REPO=/path/to/composer-swarm

@@ -19,7 +19,7 @@ Core constraints:
 
 Execution mode rules:
 - If the raw arguments include `--wait`, run in the foreground.
-- If the raw arguments include `--background`, start the review in the background.
+- If the raw arguments include `--background`, run the review in a Claude background task.
 - Otherwise, estimate review size before asking:
   - Run `git status --short --untracked-files=all`.
   - Repository reviews often take a while, so recommend background unless the repo/change is clearly tiny.
@@ -27,26 +27,33 @@ Execution mode rules:
   - `Run in background`
   - `Wait for results`
 
-When the user already supplied `--wait` or `--background`, preserve the arguments exactly:
+Argument handling:
+- Preserve the user's arguments exactly.
+- Do not strip `--wait` or `--background` yourself.
+- Do not add extra review instructions or rewrite the user's intent.
+
+Foreground flow:
+- Run:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS"
 ```
 
-Otherwise append the chosen mode as a separate CLI flag after the raw arguments.
-
-Foreground flow:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS" --wait
-```
+- Return stdout and stderr without summarizing or rewriting.
+- Do not act on review findings unless the user asks in a later message.
 
 Background flow:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS" --background
+- Launch the review with `Bash` in the background:
+```typescript
+Bash({
+  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" review "$ARGUMENTS"`,
+  description: "Composer Swarm review",
+  run_in_background: true
+})
 ```
-
-Composer Swarm uses CLI `--background` to spawn a detached Node runner and record its PID. This keeps background reviews observable through `/composer:status` and `/composer:result` without relying on host-specific background Bash APIs.
+- Do not call `BashOutput` or wait for completion in this turn.
+- After launching the command, tell the user: "Composer Swarm review started in the background. Check `/composer:status` for progress."
 
 Output rules:
-- Present stdout and stderr without summarizing or rewriting.
+- Present foreground stdout and stderr without summarizing or rewriting.
 - Do not act on review findings unless the user asks in a later message.
