@@ -1,18 +1,33 @@
 {
   "name": "composer-swarm",
-  "version": "0.3.0",
-  "private": true,
+  "version": "0.4.0",
   "type": "module",
   "license": "MIT",
-  "description": "Add fast, low-cost Composer worker teams to Claude Code or Codex.",
-  "bin": {
-    "composer-swarm": "./bin/composer-swarm.mjs"
+  "description": "Read-only Cursor Composer operation fan-out prompts for Codex and Claude Code.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jxucoder/composer-swarm.git"
   },
-  "engines": {
-    "node": ">=20.0.0"
-  },
+  "keywords": [
+    "codex",
+    "claude-code",
+    "cursor",
+    "composer",
+    "agents",
+    "plugins",
+    "reasoning",
+    "planning"
+  ],
+  "files": [
+    ".agents/",
+    ".claude-plugin/",
+    "playbooks/",
+    "plugins/",
+    "docs/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "doctor": "node bin/composer-swarm.mjs doctor",
     "test": "node --test tests/*.test.mjs"
   }
 }

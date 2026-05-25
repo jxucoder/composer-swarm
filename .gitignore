@@ -1,7 +1,5 @@
-.composer-swarm/state/
-.composer-swarm/config.json
+.composer-swarm/
 node_modules/
 repos/
 *.tgz
 .DS_Store
-docs/release-*-attempts-and-lessons.md

@@ -1,27 +1,33 @@
 {
   "name": "composer-swarm",
-  "version": "0.3.0",
-  "description": "Add fast, low-cost Composer research and worker teams to Codex.",
+  "version": "0.4.0",
+  "description": "Read-only Cursor Composer operation fan-out for Codex.",
   "author": {
     "name": "jxucoder"
   },
   "homepage": "https://github.com/jxucoder/composer-swarm",
   "repository": "https://github.com/jxucoder/composer-swarm",
   "license": "MIT",
-  "keywords": ["composer", "cursor", "codex", "agents", "research", "review"],
+  "keywords": ["composer", "cursor", "codex", "agents", "search", "review", "reasoning", "planning"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Composer Swarm",
-    "shortDescription": "Run fast local Composer research and teams from Codex.",
-    "longDescription": "Composer Swarm lets Codex use fast local Cursor/Composer workers for read-only research, broader code search, extra reasoning, candidate patches, verification, and explicit-approval apply.",
+    "shortDescription": "Fan out read-only Composer operation agents.",
+    "longDescription": "Composer Swarm gives Codex an operation fan-out protocol and bundled read-only prompt agents for wide search, deep tracing, reasoning critique, plan review, implementation review, and defect-focused review.",
     "developerName": "jxucoder",
     "category": "Productivity",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": ["Interactive"],
     "defaultPrompt": [
-      "Use Composer Swarm to fix this bug.",
-      "Use Composer Swarm to research this code path.",
-      "Run a Composer Swarm review.",
-      "Compare Composer Swarm candidates."
+      "Use the Composer Swarm investigate-bug playbook on this failure.",
+      "Use the Composer Swarm review-plan playbook on this plan.",
+      "Use the Composer Swarm review-implementation playbook on this diff.",
+      "Use the Composer Swarm pre-commit-risk-check playbook before committing.",
+      "Use Composer Swarm operation fan-out on this subsystem.",
+      "Use composer-wide-search to map the relevant files.",
+      "Use composer-deep-search to trace this behavior.",
+      "Use composer-plan-reviewer to review this plan.",
+      "Use composer-implementation-reviewer to review this diff.",
+      "Use composer-reviewer to review this surface after search."
     ],
     "brandColor": "#2563EB"
   }

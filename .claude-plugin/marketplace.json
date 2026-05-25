@@ -4,14 +4,14 @@
     "name": "jxucoder"
   },
   "metadata": {
-    "description": "Add fast, low-cost Composer research and worker teams to Claude Code.",
-    "version": "0.3.0"
+    "description": "Read-only Composer operation fan-out agents for Claude Code.",
+    "version": "0.4.0"
   },
   "plugins": [
     {
-      "name": "composer",
-      "description": "Delegate coding and research tasks from Claude Code to fast Cursor/Composer workers.",
-      "version": "0.3.0",
+      "name": "composer-swarm",
+      "description": "Read-only search, reasoning, plan review, implementation review, and defect review agents.",
+      "version": "0.4.0",
       "author": {
         "name": "jxucoder"
       },
