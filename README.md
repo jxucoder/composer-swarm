@@ -17,6 +17,8 @@ reasoning, review-only leads, and isolated candidate patches.
 - `/composer:status`, `/composer:inspect`, `/composer:logs`, and `/composer:result` to inspect local runs
 - `/composer:verify` to run configured checks against candidate worktrees
 - `/composer:apply` to apply exactly one approved candidate patch
+- Shared repo context at the top of worker prompts so workers start from the same bounded repository summary
+  before task-specific instructions and independent angles
 
 ## Requirements
 
@@ -89,7 +91,7 @@ Start with a read-only review. This works even when the current checkout has dir
 files:
 
 ```bash
-/composer:review --preset repo --include-untracked
+/composer:review --current
 /composer:status
 /composer:result
 ```
@@ -98,7 +100,7 @@ The CLI equivalent is:
 
 ```bash
 composer-swarm setup --init --trust
-composer-swarm review --preset repo --include-untracked
+composer-swarm review --current
 composer-swarm result
 ```
 
@@ -109,13 +111,16 @@ composer-swarm result
 Use this before committing a rewrite, prototype, or broad local change:
 
 ```bash
-composer-swarm review --preset repo --include-untracked
-composer-swarm result <task-id> --verbose
+composer-swarm review --current
+composer-swarm result <task-id> --synthesis
+composer-swarm result <task-id> --findings
 ```
 
 Review is read-only. It snapshots tracked modifications and untracked files into isolated worker worktrees
-so Composer can inspect the code without changing the main checkout. Treat the output as scout leads; the
-main agent should verify file references, severity, and behavior before calling anything release-blocking.
+so Composer can inspect the code without changing the main checkout. The default no-scout review runs only
+the reviewer for speed; add `--scouts` when the main agent wants broader independent coverage. Treat the
+output as scout leads; the main agent should verify file references, severity, and behavior before calling
+anything release-blocking.
 
 ### Research A Code Path
 
@@ -123,14 +128,22 @@ Use research when the main agent needs wider search or independent evidence:
 
 ```bash
 composer-swarm research "Find every place config is loaded or normalized" --workers 3 --background
+composer-swarm research "Look for release-blocking defects" --pack bugs --background
+composer-swarm research "Map auth behavior" --angles "entry points,data flow,tests,edge cases" --background
+composer-swarm research --from-plan plans/auth-research.md --background
 composer-swarm status <task-id>
 composer-swarm logs <task-id>
+composer-swarm result <task-id> --synthesis
+composer-swarm result <task-id> --findings
 composer-swarm result <task-id> --verbose
 ```
 
 The main agent should continue its own investigation and treat Composer output as leads to verify.
 Read-only workers run in Cursor plan mode, so test execution may be unavailable; use local checks for final
-behavioral claims.
+behavioral claims. Use `result --synthesis` when the host model needs a compact coverage and verification
+brief, and use `result --json` when it needs parsed research findings plus machine-readable synthesis fields
+such as worker coverage, verification counts, source worker, angle, evidence, confidence, verification tier,
+and follow-up checks.
 
 ### Try Implementation Candidates
 
@@ -138,11 +151,21 @@ Implementation teams require a clean tracked checkout:
 
 ```bash
 composer-swarm team "fix the failing tests" --builders 2 --background
+composer-swarm team --from-plan plans/implementation.md --builders 3 --background
 composer-swarm status <task-id>
 composer-swarm inspect <task-id>
 composer-swarm result <task-id>
 composer-swarm verify <task-id>
 ```
+
+Use `team --from-plan <file>` when the main reasoning model has already investigated and written the
+implementation plan. In that mode, Composer Swarm skips the Composer planner worker and sends builders
+directly to independent isolated implementations of the host-authored plan. The exact plan file is treated as
+a task input and does not make the clean-checkout gate fail.
+
+If at least one builder produces a completed candidate while another worker fails, the task is reported as
+`partial` instead of `failed`; inspect and verify the completed candidates before deciding whether to continue
+or rerun the swarm.
 
 After inspecting the candidate patch and verification output, apply exactly one selected candidate:
 
@@ -151,6 +174,11 @@ composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm cleanup <task-id>
 ```
 
+For host-agent automation, `composer-swarm result <task-id> --json` includes `candidateSummary` with
+candidate status counts, verifier check buckets, patch availability, parsed recommendation ambiguity, and the
+team reviewer note excerpt. Treat that reviewer signal as supporting evidence; the main agent still chooses
+what to recommend or apply.
+
 `cleanup` removes worker worktrees but keeps task metadata and transcripts under `.composer-swarm/state/` so
 `result`, `inspect`, and `logs` still work until you delete that state directory.
 
@@ -158,13 +186,13 @@ composer-swarm cleanup <task-id>
 
 ```text
 composer-swarm setup [--init] [--trust]
-composer-swarm research "<question>" [--workers 1..4] [--include-untracked|--snapshot-current]
-composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current]
-composer-swarm team "<task>" [--builders 1..4]
-composer-swarm status [task-id]
+composer-swarm research "<question>" [--workers 1..4] [--focus <area>] [--pack broad|bugs|flow|tests|design|release|security] [--angles <a,b>] [--from-plan <file>] [--include-untracked|--snapshot-current] [--json]
+composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--current|--include-untracked|--snapshot-current] [--json]
+composer-swarm team "<task>" [--builders 1..4] [--from-plan <file>] [--json]
+composer-swarm status [task-id] [--json]
 composer-swarm inspect [task-id]
 composer-swarm logs [task-id] [--worker <label>] [--tail 80]
-composer-swarm result [task-id] [--verbose]
+composer-swarm result [task-id] [--verbose|--findings|--synthesis|--json]
 composer-swarm verify <task-id> [--candidate <candidate-id>]
 composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm cancel <task-id>
@@ -181,8 +209,10 @@ Claude Code exposes the same workflow through `/composer:*` slash commands.
 - Implementation workers edit isolated git worktrees.
 - Cursor workers are pinned to `composer-2.5-fast`.
 - Task JSON, transcripts, patches, and worktrees live under `.composer-swarm/state/`.
-- `apply` requires a clean checkout and applies exactly one selected candidate patch.
+- `apply` requires a clean checkout at the task base commit and applies exactly one selected candidate patch.
 - `--recommended` should only be used after inspecting the result.
+- Launch commands accept `--json` for host-agent orchestration. The JSON includes `taskId`, `mode`, worker
+  labels, and useful text and JSON inspection/verification commands.
 
 ## FAQ
 
@@ -193,18 +223,32 @@ No. In repo-only v1, `--background` starts a detached local Node process and rec
 
 ### Can Composer Swarm review dirty work?
 
-Yes. Use `research` or `review` with `--include-untracked` or `--snapshot-current`. Read-only workers get a
-snapshot of the current checkout, including untracked files where available.
+Yes. Use `review --current`, or use `research`/`review` with `--include-untracked` or `--snapshot-current`.
+Read-only workers get a snapshot of the current checkout, including untracked files where available.
 
 ### Is review output authoritative?
 
 No. `review` and `research` are scout workflows. They broaden search and return evidence, confidence, and
 verification gaps. The main agent or user should validate important claims against source and local checks.
+For concise host-agent consumption, use `composer-swarm result <task-id> --synthesis`,
+`composer-swarm result <task-id> --findings`, or `composer-swarm result <task-id> --json`. Findings output
+labels each parsed item with a verification tier so source-read leads are visually distinct from executed
+checks. JSON output also includes `synthesis.workerCoverage`, `synthesis.verificationSummary`, and
+`synthesis.hostFollowUpChecks` so host agents do not need to parse the prose synthesis.
+
+### Can Composer Swarm use a KV cache?
+
+Not directly. Each worker is a separate `cursor-agent` process, so Composer Swarm cannot pass model-internal
+KV tensors between workers. It does keep worker prompts cache-friendly by putting the same bounded repo
+context summary at the top of each worker prompt, before task-specific metadata, worker labels, and angles.
+That summary lives in task state and is not a separate cache workflow or shared worker reasoning.
 
 ### What verifier does setup create?
 
 None. `setup --init` does not guess test commands. The main agent should inspect the repo and add
 `workers.verifier` to `.composer-swarm/config.json` only when it knows the right command.
+The generated config is local by default; share reviewed templates instead of committing personal trust or
+verifier settings.
 
 ### Can Composer Swarm implement from a dirty checkout?
 

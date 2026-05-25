@@ -25,9 +25,10 @@ Claude Code:
 
 ```text
 /composer:setup
-/composer:review --preset repo --include-untracked
-/composer:research map auth flow --workers 3
+/composer:review --current
+/composer:research map auth flow --pack flow
 /composer:team fix failing tests --builders 2
+/composer:team --from-plan plans/fix.md --builders 3
 /composer:status
 /composer:inspect
 /composer:logs
@@ -47,8 +48,8 @@ Use Composer Swarm to fix the failing tests with two builders.
 CLI:
 
 ```bash
-composer-swarm review --preset repo --include-untracked
-composer-swarm research "map auth token flow" --workers 3 --background
+composer-swarm review --current
+composer-swarm research "map auth token flow" --pack flow --background
 composer-swarm team "fix flaky login test" --builders 2 --background
 ```
 
@@ -59,7 +60,7 @@ composer-swarm team "fix flaky login test" --builders 2 --background
 Read-only modes should be useful even in prototype repos:
 
 ```bash
-composer-swarm review --preset repo --include-untracked
+composer-swarm review --current
 composer-swarm research "review the current rewrite" --snapshot-current
 ```
 
@@ -73,22 +74,27 @@ Implementation mode is stricter:
 
 ```bash
 composer-swarm team "implement the requested change" --builders 2
+composer-swarm team --from-plan plans/implementation.md --builders 3
 ```
 
 `team` requires a clean checkout before it starts, aside from Composer Swarm runtime state. This avoids
 candidate patches that accidentally include unrelated user work.
+
+Use `team --from-plan` after the host reasoning model has already investigated and written the implementation
+plan. The runtime skips the Composer planner in that mode and launches only builders plus the reviewer.
 
 ### Apply After Inspection
 
 The apply path stays explicit:
 
 ```bash
-composer-swarm result <task-id> --verbose
+composer-swarm result <task-id> --findings
 composer-swarm verify <task-id>
 composer-swarm apply <task-id> --candidate <candidate-id>
 ```
 
-The host should inspect the patch and verification output before applying exactly one candidate.
+The host should inspect the patch and verification output before applying exactly one candidate. Apply also
+checks that the main checkout is still at the task's recorded base commit.
 
 ## Runtime Strategy
 

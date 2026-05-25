@@ -28,13 +28,13 @@ Claude Code should use slash commands that call the runtime:
 
 ```text
 /composer:setup
-/composer:team [task]
-/composer:research [question] [--workers 1..4] [--focus architecture|tests|security|docs|release] [--include-untracked|--snapshot-current]
-/composer:review [--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current]
+/composer:team [task] [--builders 1..4] [--from-plan <file>] [--json]
+/composer:research [question] [--workers 1..4] [--focus architecture|tests|security|docs|release] [--pack broad|bugs|flow|tests|design|release|security] [--angles <a,b>] [--from-plan <file>] [--include-untracked|--snapshot-current] [--json]
+/composer:review [--preset repo|security|tests] [--scouts 0..4] [--current|--include-untracked|--snapshot-current] [--json]
 /composer:status [task-id]
 /composer:inspect [task-id]
 /composer:logs [task-id] [--worker <label>] [--tail 80]
-/composer:result [task-id]
+/composer:result [task-id] [--verbose|--findings|--synthesis|--json]
 /composer:verify <task-id>
 /composer:apply <task-id> --candidate <id>|--recommended
 /composer:cancel [task-id]
@@ -66,9 +66,11 @@ Codex environments that support local skills or plugins should get a skill with 
 - when repo understanding is broad, uncertain, or high-impact, start Codex's own investigation and launch
   `composer-swarm research "<question>" --workers <1-4> --background` as a detached local run
 - for "review my current changes" requests, use read-only review with snapshotting:
-  `composer-swarm review --preset repo --include-untracked`
-- treat research/review output as evidence-backed scout leads and cross-check important claims
-- use `composer-swarm team "<task>"` to launch Composer workers
+  `composer-swarm review --current`
+- treat research/review `result --synthesis`, `result --findings`, or `result --json` output as evidence-backed scout leads and cross-check important claims
+- use `composer-swarm team "<task>"` to launch Composer workers; use `team --from-plan <file>` when the host
+  model already wrote the implementation plan
+- use launch `--json` when the host needs task IDs and useful commands without parsing human stdout
 - keep Composer workers on Cursor model `composer-2.5-fast`
 - inspect the repo and configure `workers.verifier` only when the right project-specific check command is known
 - inspect candidate summaries and patches

@@ -37,8 +37,10 @@ From the target project:
 ```bash
 composer-swarm setup --init --trust
 composer-swarm team "implement the requested change" --builders 2
-composer-swarm research "map the config loading flow" --workers 3 --background
-composer-swarm review --preset repo --scouts 2 --include-untracked --background
+composer-swarm team --from-plan plans/implementation.md --builders 3
+composer-swarm research "map the config loading flow" --pack flow --json
+composer-swarm research "map the config loading flow" --pack flow --background
+composer-swarm review --preset repo --scouts 2 --current --background
 composer-swarm status <task-id>
 composer-swarm inspect <task-id>
 composer-swarm logs <task-id> --worker <label>
@@ -85,7 +87,8 @@ Commands:
 ```text
 /composer:setup
 /composer:team fix the failing tests --builders 2
-/composer:research map the config loading flow --workers 3
+/composer:team --from-plan plans/fix.md --builders 3
+/composer:research map the config loading flow --pack flow
 /composer:status <task-id>
 /composer:inspect <task-id>
 /composer:logs <task-id> --worker <label>
@@ -98,6 +101,10 @@ Commands:
 The command files are thin wrappers. Foreground commands return CLI output directly. When Claude Code
 supports background Bash execution, the command files can use it while preserving raw `$ARGUMENTS`; otherwise
 the runtime's portable background behavior is the detached local process described above.
+
+The runtime also records a bounded shared repo context summary in each task. This is not a model-internal KV
+cache, but it keeps shared repository metadata stable at the top of worker prompts so repeated worker calls
+are friendlier to provider prompt-prefix caches.
 
 ## Codex Plugin And Skill
 
@@ -117,9 +124,13 @@ Restart Codex after installing. The plugin-packaged copy lives at
 The skill tells Codex to:
 
 - run `setup`; use `setup --init --trust` when config is missing
-- for broad repo understanding, start its own investigation and launch `research --workers <1-4>` in parallel
-- choose `team --builders <1-4>` or `review --scouts <0-4>` from the user's request
+- for broad repo understanding, start its own investigation and launch `research --pack <name>` or
+  `research --angles <a,b>` in parallel; for host-authored decomposition, write a short Markdown plan and run
+  `research --from-plan <file>`
+- choose `team --builders <1-4>` or `review --scouts <0-4>` from the user's request; when Codex already wrote
+  an implementation plan, use `team --from-plan <file>` so Composer builders execute that host plan
 - inspect `status` and `result`
+- add launch `--json` when it needs task ids and useful commands without scraping human stdout
 - inspect local state and transcripts with `inspect` and `logs` when needed
 - run `verify` before recommending a candidate when patches exist
 - review patch artifacts before recommending a candidate
@@ -155,8 +166,8 @@ Runtime state is stored in the target project:
     worktrees/<task-id>/<worker-label>/
 ```
 
-Commit `.composer-swarm/config.json` if the worker commands are useful to the project. Ignore
-`.composer-swarm/state/`.
+Keep `.composer-swarm/config.json` local by default because it may contain trust flags or verifier commands.
+Share reviewed templates such as `swarm.config.example.json`. Ignore `.composer-swarm/state/`.
 
 ## Manual Release Checks
 
@@ -181,8 +192,8 @@ node /path/to/composer-swarm/bin/composer-swarm.mjs setup --init --trust
 mkdir -p src tests
 printf 'export const answer = 42;\n' > src/prototype.js
 printf 'import { answer } from "../src/prototype.js";\n\nconsole.log(answer);\n' > tests/prototype.test.js
-node /path/to/composer-swarm/bin/composer-swarm.mjs review --preset repo --include-untracked
-node /path/to/composer-swarm/bin/composer-swarm.mjs result <review-task-id> --verbose
+node /path/to/composer-swarm/bin/composer-swarm.mjs review --current
+node /path/to/composer-swarm/bin/composer-swarm.mjs result <review-task-id> --findings
 rm -rf src tests
 node /path/to/composer-swarm/bin/composer-swarm.mjs team "make a tiny safe edit" --builders 2
 node /path/to/composer-swarm/bin/composer-swarm.mjs result <task-id>

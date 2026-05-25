@@ -15,7 +15,58 @@ const RESEARCH_SUFFIXES = ["a", "b", "c", "d"];
 const CURSOR_CONFIG_RACE_RETRY_DELAY_MS = 750;
 const DEFAULT_WORKER_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_WORKER_TIMEOUT_KILL_GRACE_MS = 2000;
+const WORKER_PROGRESS_SAVE_INTERVAL_MS = 1000;
+const REPO_CONTEXT_SCHEMA = "composer-swarm.repo-context.v1";
+const REPO_CONTEXT_MAX_FILES = 200;
+const REPO_CONTEXT_MAX_BYTES = 12_000;
+const TASK_ID_PATTERN = /^task_[A-Za-z0-9][A-Za-z0-9_-]*$/;
+export const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 export const DEFAULT_CURSOR_MODEL = "composer-2.5-fast";
+
+export const RESEARCH_PACKS = Object.freeze({
+  broad: [
+    "architecture: map modules, entry points, ownership boundaries, and cross-module contracts",
+    "behavior: trace runtime flows, state changes, error handling, and data serialization",
+    "tests: inspect coverage gaps, fixtures, flaky patterns, and verification commands",
+    "risk: look for edge cases, compatibility breaks, security-sensitive paths, and operational hazards"
+  ],
+  bugs: [
+    "input-validation: inspect boundary parsing, user-controlled data, and missing validation",
+    "state-and-serialization: inspect persistence, query params, encoding, repeated values, and migrations",
+    "error-handling: inspect failures, cleanup, retries, cancellation, and partial writes",
+    "test-gaps: inspect missing assertions and untested regressions for risky behavior"
+  ],
+  flow: [
+    "entry-points: find command, API, UI, and background entry points for the requested flow",
+    "data-flow: trace data transformations, serialization, persistence, and external calls",
+    "failure-flow: inspect errors, retries, cleanup, cancellation, and partial-success paths",
+    "verification-flow: identify tests, fixtures, logs, and commands that prove behavior"
+  ],
+  tests: [
+    "coverage-gaps: find important behavior without direct assertions",
+    "fixture-quality: inspect mocks, fixtures, and test data for realism and blind spots",
+    "flakiness: inspect timing, concurrency, filesystem, and network assumptions",
+    "ci-and-commands: map test commands, CI gates, and missing verification steps"
+  ],
+  design: [
+    "architecture: inspect module boundaries, dependencies, and ownership seams",
+    "abstractions: identify accidental complexity, leaky APIs, and duplicated concepts",
+    "contracts: inspect public interfaces, compatibility promises, and error contracts",
+    "maintainability: inspect naming, locality, documentation, and future-change risk"
+  ],
+  release: [
+    "packaging: inspect package metadata, ignored files, generated artifacts, and install paths",
+    "compatibility: inspect migration risks, defaults, flags, and backward compatibility",
+    "docs: inspect README, command docs, skill docs, and troubleshooting gaps",
+    "smoke: identify release smoke checks, live checks, and false-green risks"
+  ],
+  security: [
+    "input-trust: inspect untrusted inputs, parsing, validation, and injection surfaces",
+    "auth-secrets: inspect tokens, auth headers, secret storage, and log redaction",
+    "filesystem-process: inspect path traversal, symlinks, shell execution, and cleanup hazards",
+    "dependency-supply-chain: inspect dependencies, install scripts, and package boundaries"
+  ]
+});
 
 export const REVIEW_PRESETS = {
   repo: [
@@ -114,7 +165,7 @@ export function loadConfig(cwd) {
     return defaultConfig();
   }
   const base = defaultConfig();
-  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const parsed = readJsonFile(filePath, "composer-swarm config");
   const { policies: _unusedPolicies, ...parsedConfig } = parsed;
   const config = {
     ...base,
@@ -139,6 +190,14 @@ export function loadConfig(cwd) {
   }
   delete config.swarm.defaultRoles;
   return config;
+}
+
+function readJsonFile(filePath, label) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(`Invalid ${label} JSON at ${filePath}: ${error.message}`, { cause: error });
+  }
 }
 
 function commandAvailable(command) {
@@ -334,8 +393,16 @@ function ensureStateDirs(config, workspaceRoot) {
   }
 }
 
+function assertSafeTaskId(taskId) {
+  const id = String(taskId ?? "");
+  if (!TASK_ID_PATTERN.test(id)) {
+    throw new Error(`Invalid task id: ${taskId}. Expected an id like task_<letters-numbers-underscores-dashes>.`);
+  }
+  return id;
+}
+
 function taskFile(config, workspaceRoot, taskId) {
-  return statePath(config, workspaceRoot, "tasks", `${taskId}.json`);
+  return statePath(config, workspaceRoot, "tasks", `${assertSafeTaskId(taskId)}.json`);
 }
 
 function writeJsonAtomic(filePath, value) {
@@ -357,6 +424,19 @@ export function findGitRoot(cwd) {
     return null;
   }
   return result.stdout.trim();
+}
+
+export function initializeGitRepository(cwd) {
+  const root = path.resolve(cwd);
+  fs.mkdirSync(root, { recursive: true });
+  const result = spawnSync("git", ["init"], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    throw new Error(`git init failed: ${(result.stderr || result.stdout).trim()}`);
+  }
+  return findGitRoot(root) ?? root;
 }
 
 export function findNestedGitRepos(cwd, options = {}) {
@@ -470,20 +550,55 @@ export function trackedStatus(gitRoot) {
   return result.stdout.trim();
 }
 
-export function mainCheckoutStatus(gitRoot) {
-  const result = runGit(gitRoot, ["status", "--porcelain"]);
+export function mainCheckoutStatus(gitRoot, options = {}) {
+  const ignoredPaths = new Set(
+    (options.ignorePaths ?? [])
+      .map((entry) => statusPathFromFile(gitRoot, entry))
+      .filter(Boolean)
+  );
+  const result = runGit(gitRoot, ["status", "--porcelain", "--untracked-files=all"]);
   return result.stdout
     .split(/\r?\n/)
     .filter(Boolean)
     .filter((line) => !isRuntimeStateStatusLine(line))
+    .filter((line) => !ignoredPaths.has(statusPathFromLine(line)))
     .join("\n")
     .trim();
 }
 
 function isRuntimeStateStatusLine(line) {
-  const rawPath = line.slice(3).trim();
-  const filePath = rawPath.split(" -> ").pop();
-  return filePath === ".composer-swarm/" || filePath?.startsWith(".composer-swarm/state/");
+  const filePath = statusPathFromLine(line);
+  return (
+    filePath === ".composer-swarm/" ||
+    filePath === ".composer-swarm/config.json" ||
+    filePath?.startsWith(".composer-swarm/state/")
+  );
+}
+
+function statusPathFromLine(line) {
+  const rawPath = String(line ?? "").slice(3).trim();
+  return decodeGitQuotedPath(rawPath.split(" -> ").pop());
+}
+
+function decodeGitQuotedPath(filePath) {
+  const text = String(filePath ?? "");
+  if (!text.startsWith("\"") || !text.endsWith("\"")) {
+    return text;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text.slice(1, -1);
+  }
+}
+
+function statusPathFromFile(gitRoot, filePath) {
+  if (!filePath) {
+    return null;
+  }
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(gitRoot, filePath);
+  const relative = path.relative(gitRoot, resolved);
+  return safeRelativePath(relative) ? relative : null;
 }
 
 function statusHasUntracked(statusText) {
@@ -492,8 +607,8 @@ function statusHasUntracked(statusText) {
     .some((line) => line.startsWith("?? "));
 }
 
-export function assertCleanMainCheckout(gitRoot) {
-  const status = mainCheckoutStatus(gitRoot);
+export function assertCleanMainCheckout(gitRoot, options = {}) {
+  const status = mainCheckoutStatus(gitRoot, options);
   if (status) {
     const untracked = statusHasUntracked(status);
     const lines = [
@@ -513,8 +628,14 @@ export function assertCleanMainCheckout(gitRoot) {
   }
 }
 
-function gitHead(gitRoot) {
-  return runGit(gitRoot, ["rev-parse", "HEAD"]).stdout.trim();
+function gitHead(gitRoot, options = {}) {
+  const result = runGit(gitRoot, ["rev-parse", "--verify", "HEAD"], {
+    allowFailure: Boolean(options.allowUnborn)
+  });
+  if (result.status !== 0 && options.allowUnborn) {
+    return null;
+  }
+  return result.stdout.trim();
 }
 
 function gitBranch(gitRoot) {
@@ -549,25 +670,129 @@ export function researchWorkerLabels(count = 2) {
   return RESEARCH_SUFFIXES.slice(0, bounded).map((suffix) => `research-${suffix}`);
 }
 
+export function researchPackNames() {
+  return Object.keys(RESEARCH_PACKS);
+}
+
+export function parseResearchAngles(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry).trim()).filter(Boolean);
+  }
+  return String(value ?? "")
+    .split(/[,;\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+export function parseResearchPlanAngles(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return [];
+  }
+  const bullets = [];
+  const fallback = [];
+  let fenced = false;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("```")) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced || line === "---") {
+      continue;
+    }
+    const bullet = /^(?:[-*]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+)(.+)$/.exec(line);
+    if (bullet?.[1]?.trim()) {
+      bullets.push(bullet[1].trim());
+      continue;
+    }
+    if (!line.startsWith("#") && !/^objective:\s*/i.test(line)) {
+      fallback.push(line);
+    }
+  }
+  return (bullets.length ? bullets : fallback)
+    .map((entry) => entry.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, RESEARCH_SUFFIXES.length);
+}
+
+function researchPackAngles(packName) {
+  const key = String(packName ?? "").trim().toLowerCase();
+  if (!key) {
+    return null;
+  }
+  const pack = RESEARCH_PACKS[key];
+  if (!pack) {
+    throw new Error(`Unknown research pack: ${packName}. Available: ${researchPackNames().join(", ")}`);
+  }
+  return { key, angles: pack };
+}
+
+export function defaultResearchWorkerCount(options = {}) {
+  const explicitAngles = parseResearchAngles(options.angles);
+  if (explicitAngles.length) {
+    return Math.min(RESEARCH_SUFFIXES.length, explicitAngles.length);
+  }
+  const planAngles = parseResearchPlanAngles(options.researchPlan);
+  if (planAngles.length) {
+    return Math.min(RESEARCH_SUFFIXES.length, planAngles.length);
+  }
+  const pack = researchPackAngles(options.pack);
+  if (pack) {
+    return Math.min(RESEARCH_SUFFIXES.length, pack.angles.length);
+  }
+  return 2;
+}
+
+export function resolveResearchAngles(options = {}) {
+  const workerCount = researchWorkerLabels(options.workers ?? defaultResearchWorkerCount(options)).length;
+  const explicitAngles = parseResearchAngles(options.angles);
+  const planAngles = parseResearchPlanAngles(options.researchPlan);
+  const pack = researchPackAngles(options.pack);
+  const baseAngles = explicitAngles.length ? explicitAngles : planAngles.length ? planAngles : pack?.angles ?? [];
+  if (!baseAngles.length) {
+    return [];
+  }
+  const fallbackAngles = RESEARCH_PACKS.broad;
+  return Array.from({ length: workerCount }, (_, index) => baseAngles[index] ?? fallbackAngles[index % fallbackAngles.length]);
+}
+
 function executionWorkerLabels(options = {}) {
   if (options.research) {
-    return researchWorkerLabels(options.workers ?? 2);
+    return researchWorkerLabels(options.workers ?? defaultResearchWorkerCount(options));
   }
   if (options.review) {
-    return ["planner", ...scoutWorkerLabels(options.scouts ?? 0), "reviewer"];
+    const scouts = scoutWorkerLabels(options.scouts ?? 0);
+    return scouts.length ? ["planner", ...scouts, "reviewer"] : ["reviewer"];
+  }
+  if (hasHostImplementationPlan(options)) {
+    return [...builderWorkerLabels(options.builders ?? 2), "reviewer"];
   }
   return ["planner", ...builderWorkerLabels(options.builders ?? 2), "reviewer"];
+}
+
+function hasHostImplementationPlan(options = {}) {
+  return Boolean(String(options.implementationPlan ?? "").trim());
 }
 
 export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   const gitRoot = requireGitWorkspace(workspaceRoot);
   const isResearch = Boolean(options.research);
   const isReadOnlyTask = isResearch || Boolean(options.review);
-  const checkoutStatus = mainCheckoutStatus(gitRoot);
+  const implementationPlan = !isResearch && !options.review && options.implementationPlan
+    ? String(options.implementationPlan).trim()
+    : undefined;
+  const statusIgnorePaths = implementationPlan && options.implementationPlanFile ? [options.implementationPlanFile] : [];
+  const checkoutStatus = mainCheckoutStatus(gitRoot, { ignorePaths: statusIgnorePaths });
   if (!isReadOnlyTask) {
-    assertCleanMainCheckout(gitRoot);
+    assertCleanMainCheckout(gitRoot, { ignorePaths: statusIgnorePaths });
   }
   ensureStateDirs(config, workspaceRoot);
+  const headSha = gitHead(gitRoot, { allowUnborn: true });
+  const usesSyntheticBase = !headSha;
 
   const taskId = options.taskId ?? createTaskId();
   const createdAt = new Date().toISOString();
@@ -575,7 +800,7 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   const builderCount = isResearch ? 0 : builderWorkerLabels(requestedBuilders).length;
   const requestedScouts = options.scouts ?? 0;
   const scoutCount = scoutWorkerLabels(requestedScouts).length;
-  const requestedResearchWorkers = options.workers ?? 2;
+  const requestedResearchWorkers = options.workers ?? defaultResearchWorkerCount(options);
   const researchCount = isResearch ? researchWorkerLabels(requestedResearchWorkers).length : 0;
   if (isResearch && Number(requestedResearchWorkers) !== researchCount) {
     throw new Error("composer-swarm research requires 1 to 4 workers.");
@@ -588,8 +813,13 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
   }
   const model = resolveCursorModel(config, options.model ?? null);
   const workerLabels = executionWorkerLabels(options);
+  const researchPack = isResearch && options.pack ? String(options.pack).trim().toLowerCase() : undefined;
+  const researchPlan = isResearch && options.researchPlan ? String(options.researchPlan).trim() : undefined;
+  const researchAngles = isResearch
+    ? resolveResearchAngles({ pack: researchPack, angles: options.angles, researchPlan, workers: researchCount })
+    : undefined;
   const snapshotRequested = Boolean(options.snapshotCurrent || options.includeUntracked);
-  const snapshotCurrent = isReadOnlyTask && (snapshotRequested || Boolean(checkoutStatus));
+  const snapshotCurrent = (isReadOnlyTask && (snapshotRequested || Boolean(checkoutStatus))) || usesSyntheticBase;
   const task = {
     schema: TASK_SCHEMA,
     taskId,
@@ -598,7 +828,8 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
     status: options.background ? "queued" : "created",
     workspaceRoot: path.resolve(workspaceRoot),
     gitRoot,
-    baseSha: gitHead(gitRoot),
+    baseSha: headSha ?? EMPTY_TREE_SHA,
+    baseIsEmptyTree: usesSyntheticBase,
     baseBranch: gitBranch(gitRoot),
     createdAt,
     updatedAt: createdAt,
@@ -611,9 +842,16 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
       review: Boolean(options.review),
       research: isResearch,
       focus: isResearch ? options.focus ?? null : undefined,
+      researchPack: isResearch ? researchPack ?? null : undefined,
+      researchPlan: isResearch ? researchPlan ?? null : undefined,
+      researchPlanFile: isResearch ? options.researchPlanFile ?? null : undefined,
+      researchAngles: isResearch ? researchAngles : undefined,
+      implementationPlan: implementationPlan ?? undefined,
+      implementationPlanFile: implementationPlan ? options.implementationPlanFile ?? null : undefined,
       snapshotCurrent,
       snapshotIncludesUntracked: snapshotCurrent,
-      snapshotReason: snapshotCurrent ? (checkoutStatus ? "dirty-worktree" : "requested") : null,
+      snapshotReason: snapshotCurrent ? (usesSyntheticBase ? "unborn-head" : checkoutStatus ? "dirty-worktree" : "requested") : null,
+      syntheticBase: usesSyntheticBase,
       snapshotStatus: snapshotCurrent && checkoutStatus ? checkoutStatus : undefined
     },
     workers: workerLabels.map((label) => {
@@ -630,21 +868,29 @@ export function createTeamTask(config, workspaceRoot, objective, options = {}) {
     candidates: [],
     reviewer: null
   };
+  task.repoContext = createRepoContext(task, checkoutStatus);
   saveTask(config, workspaceRoot, task);
   return task;
 }
 
 export function saveTask(config, workspaceRoot, task) {
+  assertSafeTaskId(task.taskId);
   task.updatedAt = new Date().toISOString();
   writeJsonAtomic(taskFile(config, workspaceRoot, task.taskId), task);
 }
 
 export function loadTask(config, workspaceRoot, taskId) {
+  const safeTaskId = assertSafeTaskId(taskId);
   const filePath = taskFile(config, workspaceRoot, taskId);
   if (!fs.existsSync(filePath)) {
     throw new Error(`Task not found: ${taskId}`);
   }
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const task = readJsonFile(filePath, "composer-swarm task");
+  const storedTaskId = assertSafeTaskId(task.taskId);
+  if (storedTaskId !== safeTaskId) {
+    throw new Error(`Task state mismatch: requested ${safeTaskId}, file contains ${storedTaskId}.`);
+  }
+  return task;
 }
 
 export function listTasks(config, workspaceRoot) {
@@ -655,7 +901,16 @@ export function listTasks(config, workspaceRoot) {
   return fs
     .readdirSync(tasksDir)
     .filter((file) => file.endsWith(".json"))
-    .map((file) => JSON.parse(fs.readFileSync(path.join(tasksDir, file), "utf8")))
+    .map((file) => {
+      try {
+        const task = readJsonFile(path.join(tasksDir, file), "composer-swarm task");
+        assertSafeTaskId(task.taskId);
+        return task;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
@@ -688,11 +943,11 @@ function relativePath(workspaceRoot, filePath) {
 }
 
 function transcriptPath(config, workspaceRoot, taskId, workerLabel) {
-  return statePath(config, workspaceRoot, "transcripts", taskId, `${workerLabel}.jsonl`);
+  return statePath(config, workspaceRoot, "transcripts", assertSafeTaskId(taskId), `${workerLabel}.jsonl`);
 }
 
 function artifactPath(config, workspaceRoot, taskId, candidateId) {
-  return statePath(config, workspaceRoot, "artifacts", taskId, `${candidateId}.patch`);
+  return statePath(config, workspaceRoot, "artifacts", assertSafeTaskId(taskId), `${candidateId}.patch`);
 }
 
 function safeRelativePath(relativeFilePath) {
@@ -709,7 +964,15 @@ function isRuntimeStatePath(relativeFilePath) {
   return relativeFilePath === ".composer-swarm/state" || relativeFilePath.startsWith(".composer-swarm/state/");
 }
 
-function copyUntrackedFileIntoSnapshot(gitRoot, worktree, relativeFilePath) {
+function safeSnapshotSymlinkTarget(gitRoot, source, linkTarget) {
+  if (path.isAbsolute(linkTarget)) {
+    return false;
+  }
+  const resolvedTarget = path.resolve(path.dirname(source), linkTarget);
+  return safeRelativePath(path.relative(gitRoot, resolvedTarget));
+}
+
+function copyFileIntoSnapshot(gitRoot, worktree, relativeFilePath) {
   if (!safeRelativePath(relativeFilePath) || isRuntimeStatePath(relativeFilePath)) {
     return;
   }
@@ -722,7 +985,10 @@ function copyUntrackedFileIntoSnapshot(gitRoot, worktree, relativeFilePath) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.rmSync(destination, { recursive: true, force: true });
   if (stat.isSymbolicLink()) {
-    fs.symlinkSync(fs.readlinkSync(source), destination);
+    const linkTarget = fs.readlinkSync(source);
+    if (safeSnapshotSymlinkTarget(gitRoot, source, linkTarget)) {
+      fs.symlinkSync(linkTarget, destination);
+    }
     return;
   }
   if (stat.isDirectory()) {
@@ -732,6 +998,16 @@ function copyUntrackedFileIntoSnapshot(gitRoot, worktree, relativeFilePath) {
   if (stat.isFile()) {
     fs.copyFileSync(source, destination);
   }
+}
+
+function snapshotFileList(gitRoot) {
+  const tracked = runGit(gitRoot, ["ls-files", "-z"], {
+    maxBuffer: 1024 * 1024 * 20
+  }).stdout;
+  const untracked = runGit(gitRoot, ["ls-files", "--others", "--exclude-standard", "-z"], {
+    maxBuffer: 1024 * 1024 * 20
+  }).stdout;
+  return [...new Set(`${tracked}\0${untracked}`.split("\0").filter(Boolean))].sort();
 }
 
 function applyCurrentSnapshot(task, worktree) {
@@ -751,8 +1027,129 @@ function applyCurrentSnapshot(task, worktree) {
       maxBuffer: 1024 * 1024 * 20
     }).stdout;
     for (const relativeFilePath of untracked.split("\0").filter(Boolean)) {
-      copyUntrackedFileIntoSnapshot(gitRoot, worktree, relativeFilePath);
+      copyFileIntoSnapshot(gitRoot, worktree, relativeFilePath);
     }
+  }
+}
+
+function readJsonIfPresent(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function repoPackageSummary(gitRoot) {
+  const packageJson = readJsonIfPresent(path.join(gitRoot, "package.json"));
+  if (!packageJson) {
+    return ["- package.json: not found"];
+  }
+  const lines = [
+    `- name: ${packageJson.name ?? "(unnamed)"}`,
+    `- type: ${packageJson.type ?? "(default)"}`,
+    `- scripts: ${Object.keys(packageJson.scripts ?? {}).join(", ") || "(none)"}`,
+    `- dependencies: ${Object.keys(packageJson.dependencies ?? {}).length}`,
+    `- devDependencies: ${Object.keys(packageJson.devDependencies ?? {}).length}`
+  ];
+  if (packageJson.engines?.node) {
+    lines.push(`- node: ${packageJson.engines.node}`);
+  }
+  return lines;
+}
+
+function repoContextFileList(gitRoot) {
+  return snapshotFileList(gitRoot)
+    .filter((entry) => safeRelativePath(entry) && !isRuntimeStatePath(entry))
+    .filter((entry) => !entry.startsWith("node_modules/") && !entry.startsWith(".git/"))
+    .sort();
+}
+
+function truncateContextText(text) {
+  if (Buffer.byteLength(text, "utf8") <= REPO_CONTEXT_MAX_BYTES) {
+    return text;
+  }
+  let truncated = text;
+  while (Buffer.byteLength(`${truncated}\n...[repo context truncated]\n`, "utf8") > REPO_CONTEXT_MAX_BYTES) {
+    truncated = truncated.slice(0, Math.max(0, truncated.length - 500));
+  }
+  return `${truncated.trimEnd()}\n...[repo context truncated]\n`;
+}
+
+function buildRepoContextText(task, checkoutStatus) {
+  const fileList = repoContextFileList(task.gitRoot);
+  const shownFiles = fileList.slice(0, REPO_CONTEXT_MAX_FILES);
+  const lines = [
+    "Repository summary",
+    `Schema: ${REPO_CONTEXT_SCHEMA}`,
+    `Base commit: ${task.baseSha ?? "unknown"}`,
+    `Base branch: ${task.baseBranch ?? "(detached)"}`,
+    task.options?.snapshotCurrent
+      ? `Snapshot: current checkout (${task.options.snapshotReason ?? "requested"})`
+      : "Snapshot: committed checkout",
+    "",
+    "Package metadata:",
+    ...repoPackageSummary(task.gitRoot),
+    "",
+    `File inventory (${fileList.length} file${fileList.length === 1 ? "" : "s"}; showing ${shownFiles.length}):`,
+    ...shownFiles.map((entry) => `- ${entry}`)
+  ];
+  if (fileList.length > shownFiles.length) {
+    lines.push(`- ...${fileList.length - shownFiles.length} additional file(s) omitted`);
+  }
+  if (checkoutStatus) {
+    lines.push("", "Current checkout status:", checkoutStatus);
+  }
+  return truncateContextText(lines.join("\n"));
+}
+
+function createRepoContext(task, checkoutStatus) {
+  const key = `repo-context-${String(task.baseSha ?? EMPTY_TREE_SHA).slice(0, 12)}`;
+  const text = buildRepoContextText(task, checkoutStatus);
+  const files = repoContextFileList(task.gitRoot);
+  return {
+    schema: REPO_CONTEXT_SCHEMA,
+    key,
+    bytes: Buffer.byteLength(text, "utf8"),
+    fileCount: files.length,
+    generatedAt: new Date().toISOString(),
+    text
+  };
+}
+
+function createSyntheticSnapshotWorktree(config, workspaceRoot, task, workerLabel) {
+  const worktree = statePath(config, workspaceRoot, "worktrees", assertSafeTaskId(task.taskId), workerLabel);
+  fs.mkdirSync(path.dirname(worktree), { recursive: true });
+  fs.mkdirSync(worktree, { recursive: true });
+  runGit(worktree, ["init", "-q"]);
+  for (const relativeFilePath of snapshotFileList(task.gitRoot)) {
+    copyFileIntoSnapshot(task.gitRoot, worktree, relativeFilePath);
+  }
+  runGit(worktree, ["add", "-A"]);
+  runGit(worktree, [
+    "-c",
+    "user.name=Composer Swarm",
+    "-c",
+    "user.email=composer-swarm@example.invalid",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "composer-swarm synthetic base"
+  ]);
+  return worktree;
+}
+
+function removeExistingWorktree(task, workspaceRoot, worktree) {
+  if (!fs.existsSync(worktree)) {
+    return;
+  }
+  removeWorktree(task.gitRoot ?? workspaceRoot, worktree);
+  if (task.gitRoot) {
+    runGit(task.gitRoot, ["worktree", "prune"], { allowFailure: true });
   }
 }
 
@@ -762,10 +1159,11 @@ function appendTranscript(filePath, event) {
 }
 
 function createWorktree(config, workspaceRoot, task, workerLabel) {
-  const worktree = statePath(config, workspaceRoot, "worktrees", task.taskId, workerLabel);
+  const worktree = statePath(config, workspaceRoot, "worktrees", assertSafeTaskId(task.taskId), workerLabel);
   fs.mkdirSync(path.dirname(worktree), { recursive: true });
-  if (fs.existsSync(worktree)) {
-    return worktree;
+  removeExistingWorktree(task, workspaceRoot, worktree);
+  if (task.options?.syntheticBase || task.baseIsEmptyTree) {
+    return createSyntheticSnapshotWorktree(config, workspaceRoot, task, workerLabel);
   }
   runGit(task.gitRoot, ["worktree", "add", "--detach", worktree, task.baseSha]);
   if (task.options?.snapshotCurrent) {
@@ -792,7 +1190,9 @@ export function buildCursorAgentArgs({ workerLabel, worktree, prompt, model }) {
 }
 
 export function buildWorkerPrompt(workerLabel, task, context = {}) {
-  const plannerText = context.plannerOutput?.trim() || "No planner output is available yet.";
+  const plannerText =
+    context.plannerOutput?.trim() ||
+    (task.options?.implementationPlan ? "Use the host-authored implementation plan above." : "No planner output is available yet.");
   const candidateText = context.candidateText?.trim() || "No candidates are available yet.";
   const scoutText = context.scoutText?.trim() || "No scout notes are available yet.";
   const isResearch = Boolean(task.options?.research);
@@ -802,16 +1202,19 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
     workerLabel.startsWith("scout-") ||
     workerLabel.startsWith("research-");
   const readOnlyClaimRule =
-    "- Back every important claim with file paths, line numbers, commands, or reproducible evidence. If you cannot verify it, mark Confidence: low and explain the verification gap.";
+    "- Back every important claim with file paths, line numbers, commands, or reproducible evidence. Mark Verification as tests_run, source_read, docs_read, or unverified: <reason>.";
   const base = [
     "You are a Composer worker launched by composer-swarm.",
+    repoContextPrompt(task),
+    "",
+    "Task metadata:",
     `Task id: ${task.taskId}`,
-    `Worker label: ${workerLabel}`,
     `Objective: ${task.objective}`,
     `Base commit: ${task.baseSha ?? "unknown"}`,
     task.options?.snapshotCurrent
       ? "Workspace note: this isolated worktree includes a snapshot of the user's current uncommitted checkout, including untracked files where available."
       : null,
+    implementationPlanPrompt(task),
     "",
     "Rules:",
     "- Work only in the workspace passed to cursor-agent.",
@@ -825,28 +1228,37 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
       : "- End with a concise summary, changed files, risks, and follow-up notes.",
     isReadOnlyWorker
       ? "- Final answer only: do not include planning narration, status updates, internal reasoning, or tool-use commentary."
+      : null,
+    isReadOnlyWorker
+      ? "- Return the report as plain final text. Do not use CreatePlan or another planning container for the final report."
       : null
   ].filter((line) => line !== null);
+  const assignment = ["", "Worker assignment:", `Worker label: ${workerLabel}`];
 
   if (workerLabel.startsWith("research-")) {
     return [
       ...base,
+      ...assignment,
       "",
       "Research pass:",
       "Use Cursor's repository search and code-understanding tools aggressively.",
       researchFocus(task.options?.focus),
-      "Independently choose a useful search angle and avoid broad summaries.",
+      researchPlanPrompt(task),
+      researchAnglePrompt(task, workerLabel),
+      "Avoid duplicating the other research workers; prioritize evidence the host model can reconcile.",
       "The host agent is also doing its own investigation in parallel; return evidence it can reconcile.",
       "Do not attempt shell or test execution if plan mode rejects it; report that as a verification gap.",
       "",
       "Required output format:",
       "Research question: <repeat the question>",
+      "Angle: <assigned angle or chosen angle>",
       "Confidence: high|medium|low",
       "",
       "Findings:",
       "- Finding: <specific claim>",
       "  Evidence: <path:line>, <path:line>, or command output",
       "  Why it matters: <short explanation>",
+      "  Verification: tests_run|source_read|docs_read|unverified: <reason>",
       "  Follow-up: <what the host should inspect or verify>",
       "",
       "Open questions:",
@@ -861,6 +1273,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
     if (task.options?.review) {
       return [
         ...base,
+        ...assignment,
         "",
         "Review planning pass:",
         "Define the repository areas the review pass should inspect.",
@@ -870,6 +1283,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
     }
     return [
       ...base,
+      ...assignment,
       "",
       "Planning pass:",
       "Produce a scoped implementation plan for the implementation workers.",
@@ -881,12 +1295,14 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
   if (workerLabel.startsWith("builder-")) {
     return [
       ...base,
+      ...assignment,
       "",
       "Planner output:",
       plannerText,
       "",
       "Implementation pass:",
       "Implement one complete candidate patch in this isolated worktree.",
+      "Treat this as an independent candidate attempt. Do not try to match other builders; if the plan leaves room for choices, pick a reasonable local approach and state the tradeoff.",
       "Leave the final diff in the worktree for composer-swarm to collect."
     ].join("\n");
   }
@@ -895,6 +1311,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
     if (task.options?.review) {
       return [
         ...base,
+        ...assignment,
         "",
         "Planner output:",
         plannerText,
@@ -913,12 +1330,14 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
         "Why it matters: <short rationale>",
         "Suggested fix: <concrete change>",
         "Confidence: high|medium|low",
+        "Verification: tests_run|source_read|docs_read|unverified: <reason>",
         "Evidence: <file path, line, command, or observation>",
         "Call out missing tests or verification gaps separately."
       ].join("\n");
     }
     return [
       ...base,
+      ...assignment,
       "",
       "Planner output:",
       plannerText,
@@ -928,6 +1347,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
       "",
       "Patch review pass:",
       "Review the candidates for concrete bugs, regressions, conflicts, and missing tests.",
+      "Separate verified defects from preferences or tradeoffs. Any candidate preference is supporting signal for the host, not the final decision.",
       "Do not apply or edit any candidate. Do not choose for the user; report objective findings."
     ].join("\n");
   }
@@ -935,6 +1355,7 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
   if (workerLabel.startsWith("scout-")) {
     return [
       ...base,
+      ...assignment,
       "",
       "Planner output:",
       plannerText,
@@ -943,21 +1364,65 @@ export function buildWorkerPrompt(workerLabel, task, context = {}) {
       "Do not edit files.",
       scoutFocus(),
       "Do not attempt shell or test execution if plan mode rejects it; report that as a verification gap.",
-      "Report concrete findings using Severity, File, Issue, Why it matters, Suggested fix, Confidence, and Evidence.",
+      "Report concrete findings using Severity, File, Issue, Why it matters, Suggested fix, Confidence, Verification, and Evidence.",
       "Prefer useful negative findings over broad summaries."
     ].join("\n");
   }
 
-  return base.join("\n");
+  return [...base, ...assignment].join("\n");
+}
+
+function repoContextPrompt(task) {
+  const text = String(task.repoContext?.text ?? task.contextCache?.text ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  return ["Shared repo context:", text].join("\n");
+}
+
+function implementationPlanPrompt(task) {
+  const text = String(task.options?.implementationPlan ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const truncated = text.length > 16000 ? `${text.slice(0, 16000)}\n...[implementation plan truncated]` : text;
+  const source = task.options?.implementationPlanFile ? ` (${task.options.implementationPlanFile})` : "";
+  return [`Host-authored implementation plan${source}:`, truncated].join("\n");
 }
 
 function scoutFocus() {
   return "Independently choose a useful inspection angle that adds coverage beyond the planning pass and other workers.";
 }
 
+function researchAngleForWorker(task, workerLabel) {
+  const labels = researchWorkerLabels(task.options?.workers ?? defaultResearchWorkerCount(task.options ?? {}));
+  const index = labels.indexOf(workerLabel);
+  if (index === -1) {
+    return null;
+  }
+  return task.options?.researchAngles?.[index] ?? null;
+}
+
+function researchAnglePrompt(task, workerLabel) {
+  const angle = researchAngleForWorker(task, workerLabel);
+  if (!angle) {
+    return "Assigned research angle: choose a distinct angle that adds useful coverage beyond other workers.";
+  }
+  return `Assigned research angle: ${angle}. Stay mostly within this angle so the host model gets non-duplicative coverage.`;
+}
+
+function researchPlanPrompt(task) {
+  const text = String(task.options?.researchPlan ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const truncated = text.length > 12000 ? `${text.slice(0, 12000)}\n...[research plan truncated]` : text;
+  return ["Host-authored research plan:", truncated].join("\n");
+}
+
 function researchFocus(focus) {
   const requested = focus ? `Requested focus: ${focus}.` : "Requested focus: broad repository research.";
-  return `${requested} Pick a distinct angle that adds useful coverage for the host agent.`;
+  return `${requested} Use this as the shared topic boundary while following your assigned angle.`;
 }
 
 function parseJsonLine(line) {
@@ -968,9 +1433,132 @@ function parseJsonLine(line) {
   }
 }
 
-function textFromJson(value) {
+function parseMaybeJson(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return value;
+  }
+  return parseJsonLine(trimmed) ?? value;
+}
+
+function formatStructuredReportObject(value, depth = 0) {
+  if (value === null || value === undefined || depth > 4) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value.trim() || null;
+  }
+  if (typeof value !== "object") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => formatStructuredReportObject(entry, depth + 1))
+      .filter(Boolean);
+    return parts.length ? parts.join("\n\n") : null;
+  }
+
+  if (Array.isArray(value.findings)) {
+    const parts = value.findings
+      .map((finding) => formatFindingLikeObject(finding, depth + 1))
+      .filter(Boolean);
+    return parts.length ? parts.join("\n\n") : null;
+  }
+
+  for (const key of ["report", "review", "findings_markdown", "markdown", "final", "answer", "result", "output"]) {
+    if (value[key] !== undefined) {
+      const text = formatStructuredReportObject(parseMaybeJson(value[key]), depth + 1);
+      if (text) {
+        return text;
+      }
+    }
+  }
+
+  for (const key of ["plan", "steps", "items"]) {
+    if (Array.isArray(value[key])) {
+      const text = formatStructuredReportObject(value[key], depth + 1);
+      if (text) {
+        return text;
+      }
+    }
+  }
+
+  return formatFindingLikeObject(value, depth + 1);
+}
+
+function formatFindingLikeObject(value, depth = 0) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || depth > 5) {
+    return formatStructuredReportObject(value, depth + 1);
+  }
+  const fields = [
+    ["Severity", ["severity", "priority"]],
+    ["File", ["file", "path", "location"]],
+    ["Line", ["line", "lineNumber", "line_number"]],
+    ["Issue", ["issue", "claim", "finding", "title", "problem", "description", "content", "text"]],
+    ["Why it matters", ["why", "why_it_matters", "impact", "risk"]],
+    ["Suggested fix", ["suggested_fix", "suggestedFix", "fix", "recommendation"]],
+    ["Confidence", ["confidence"]],
+    ["Verification", ["verification", "verified", "verified_by", "verifiedBy", "verified_by_worker"]],
+    ["Evidence", ["evidence", "source", "sources"]]
+  ];
+  const lines = [];
+  const consumed = new Set();
+  for (const [label, keys] of fields) {
+    const key = keys.find((candidate) => value[candidate] !== undefined && value[candidate] !== null);
+    if (!key) {
+      continue;
+    }
+    consumed.add(key);
+    const text = formatStructuredReportObject(value[key], depth + 1);
+    if (text) {
+      lines.push(`${label}: ${text.split(/\r?\n/).join(" ")}`);
+    }
+  }
+  if (!lines.length) {
+    for (const [key, nested] of Object.entries(value)) {
+      if (consumed.has(key) || ["id", "type", "name", "status"].includes(key)) {
+        continue;
+      }
+      const text = formatStructuredReportObject(nested, depth + 1);
+      if (text) {
+        lines.push(`${key}: ${text.split(/\r?\n/).join(" ")}`);
+      }
+    }
+  }
+  return lines.length ? lines.join("\n") : null;
+}
+
+function toolPayloadText(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const type = String(value.type ?? value.event ?? value.kind ?? "").toLowerCase();
+  const name = value.name ?? value.toolName ?? value.tool_name ?? value.function?.name ?? value.call?.name;
+  const isToolLike = type.includes("tool") || type.includes("function") || Boolean(name);
+  if (!isToolLike) {
+    return null;
+  }
+  const payload =
+    value.input ?? value.arguments ?? value.args ?? value.parameters ?? value.call?.input ?? value.function?.arguments;
+  if (payload === undefined || payload === null) {
+    return null;
+  }
+  return formatStructuredReportObject(parseMaybeJson(payload));
+}
+
+function textFromJson(value, depth = 0) {
   if (!value || typeof value !== "object") {
     return null;
+  }
+  if (depth > 6) {
+    return null;
+  }
+  const toolText = toolPayloadText(value);
+  if (toolText) {
+    return toolText;
   }
   for (const key of ["text", "message", "summary", "content", "result", "output"]) {
     const found = value[key];
@@ -982,7 +1570,7 @@ function textFromJson(value) {
     return value.delta;
   }
   if (value.message && typeof value.message === "object") {
-    const nested = textFromJson(value.message);
+    const nested = textFromJson(value.message, depth + 1);
     if (nested) {
       return nested;
     }
@@ -996,10 +1584,21 @@ function textFromJson(value) {
         if (part && typeof part === "object" && typeof part.text === "string") {
           return part.text;
         }
+        if (part && typeof part === "object") {
+          return textFromJson(part, depth + 1) ?? "";
+        }
         return "";
       })
       .filter(Boolean);
     return parts.length ? parts.join("") : null;
+  }
+  for (const key of ["data", "payload", "event", "item", "response"]) {
+    if (value[key] && typeof value[key] === "object") {
+      const nested = textFromJson(value[key], depth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
   }
   return null;
 }
@@ -1079,6 +1678,15 @@ function formatDuration(ms) {
   return `${ms}ms`;
 }
 
+function workerSpawnOptions(worktree) {
+  return {
+    cwd: worktree,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32"
+  };
+}
+
 async function runCursorWorker(config, workspaceRoot, task, workerLabel, context = {}) {
   const worker = workerForLabel(task, workerLabel);
   const agent = agentForWorker(config, workerLabel) ?? fallbackCursorAgent(workerLabel);
@@ -1126,6 +1734,7 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
     let idleTimer = null;
     let forceKillTimer = null;
     let timeoutDetail = null;
+    let lastProgressSaveMs = 0;
 
     function clearTimer(timer) {
       if (timer) {
@@ -1158,11 +1767,16 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
       return `Worker ${workerLabel} produced no output for ${formatDuration(idleTimeoutMs)}. Last output: ${lastOutput}. Started: ${started}.`;
     }
 
-    function saveWorkerProgress() {
+    function saveWorkerProgress(options = {}) {
+      const now = Date.now();
+      if (!options.force && lastProgressSaveMs && now - lastProgressSaveMs < WORKER_PROGRESS_SAVE_INTERVAL_MS) {
+        return;
+      }
       if (safeLoadTask(config, workspaceRoot, task.taskId)?.status === "cancelled") {
         task.status = "cancelled";
         return;
       }
+      lastProgressSaveMs = now;
       saveTask(config, workspaceRoot, task);
     }
 
@@ -1192,20 +1806,12 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
       });
       saveTask(config, workspaceRoot, task);
       if (child?.pid) {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          // The process may have already exited.
-        }
+        killPid(child.pid, { processGroup: true, signal: "SIGTERM" });
         forceKillTimer = setTimeout(() => {
           if (settled) {
             return;
           }
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            // The process may have already exited.
-          }
+          killPid(child.pid, { processGroup: true, signal: "SIGKILL" });
           finish("failed", { ...timeoutDetail, signal: "SIGKILL" });
         }, timeoutKillGraceMs);
         forceKillTimer.unref?.();
@@ -1319,11 +1925,7 @@ async function runCursorWorker(config, workspaceRoot, task, workerLabel, context
     function startAttempt() {
       attempts += 1;
       try {
-        child = spawn(agent.command, args, {
-          cwd: worktree,
-          env: process.env,
-          stdio: ["ignore", "pipe", "pipe"]
-        });
+        child = spawn(agent.command, args, workerSpawnOptions(worktree));
       } catch (error) {
         finish("failed", { error: error instanceof Error ? error.message : String(error) });
         return;
@@ -1459,6 +2061,37 @@ function candidateReviewText(config, workspaceRoot, task) {
     .join("\n\n---\n\n");
 }
 
+function terminalWorkflowStatus(task) {
+  if (!task.workers?.some((worker) => worker.status === "failed")) {
+    return "completed";
+  }
+  if (task.options?.review) {
+    return task.reviewer?.status === "completed" || (task.scouts ?? []).some((scout) => scout.status === "completed")
+      ? "partial"
+      : "failed";
+  }
+  return (task.candidates ?? []).some((candidate) => candidate.status === "completed") ? "partial" : "failed";
+}
+
+function failedWorkerFromRejection(task, workerLabel, reason) {
+  const worker = workerForLabel(task, workerLabel);
+  Object.assign(worker, {
+    status: "failed",
+    completedAt: new Date().toISOString(),
+    error: reason instanceof Error ? reason.message : String(reason)
+  });
+  delete worker.pid;
+  return worker;
+}
+
+function settledWorkers(task, workerLabels, results) {
+  return results.map((result, index) =>
+    result.status === "fulfilled"
+      ? result.value
+      : failedWorkerFromRejection(task, workerLabels[index], result.reason)
+  );
+}
+
 function scoutReviewText(task) {
   const scouts = task.scouts ?? [];
   if (!scouts.length) {
@@ -1496,35 +2129,48 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       if (isCancelled(config, workspaceRoot, task.taskId)) {
         return markCancelled(config, workspaceRoot, task);
       }
-      const researchWorkers = settledResearchWorkers.map((result, index) => {
-        if (result.status === "fulfilled") {
-          return result.value;
-        }
-        const label = researchWorkerList[index];
-        const worker = workerForLabel(task, label);
-        Object.assign(worker, {
-          status: "failed",
-          completedAt: new Date().toISOString(),
-          error: result.reason instanceof Error ? result.reason.message : String(result.reason)
-        });
-        return worker;
-      });
+      const researchWorkers = settledWorkers(task, researchWorkerList, settledResearchWorkers);
       task.research = researchWorkers.map((worker) => ({
         worker: workerLabelFor(worker),
+        angle: researchAngleForWorker(task, workerLabelFor(worker)),
         status: worker.status,
         transcript: worker.transcript,
         notes: worker.finalOutput || "(research worker did not provide notes)",
         error: worker.error ?? null,
         exitCode: worker.exitCode ?? null
       }));
-      task.status = researchWorkers.some((worker) => worker.status === "failed") ? "failed" : "completed";
+      const completedResearchWorkers = researchWorkers.filter((worker) => worker.status === "completed").length;
+      const failedResearchWorkers = researchWorkers.filter((worker) => worker.status === "failed").length;
+      task.status = failedResearchWorkers === 0
+        ? "completed"
+        : completedResearchWorkers > 0
+          ? "partial"
+          : "failed";
       task.completedAt = new Date().toISOString();
       delete task.backgroundPid;
       saveTask(config, workspaceRoot, task);
       return task;
     }
 
-    const planner = await runCursorWorker(config, workspaceRoot, task, "planner");
+    const plannerWorker = task.workers.map(workerLabelFor).includes("planner");
+    const planner = plannerWorker
+      ? await runCursorWorker(config, workspaceRoot, task, "planner")
+      : {
+          finalOutput: task.options?.implementationPlan
+            ? "Use the host-authored implementation plan above."
+            : "",
+          status: task.options?.implementationPlan ? "provided" : "skipped"
+        };
+    if (!plannerWorker && task.options?.implementationPlan) {
+      task.planner = {
+        worker: "host",
+        status: "provided",
+        source: "implementation_plan",
+        file: task.options.implementationPlanFile ?? null,
+        notes: task.options.implementationPlan
+      };
+      saveTask(config, workspaceRoot, task);
+    }
     if (isCancelled(config, workspaceRoot, task.taskId)) {
       return markCancelled(config, workspaceRoot, task);
     }
@@ -1533,7 +2179,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       .map(workerLabelFor)
       .filter((label) => label?.startsWith("scout-"));
     if (scoutWorkerList.length) {
-      const scouts = await Promise.all(
+      const settledScouts = await Promise.allSettled(
         scoutWorkerList.map((label) =>
           runCursorWorker(config, workspaceRoot, task, label, { plannerOutput: planner.finalOutput })
         )
@@ -1541,6 +2187,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       if (isCancelled(config, workspaceRoot, task.taskId)) {
         return markCancelled(config, workspaceRoot, task);
       }
+      const scouts = settledWorkers(task, scoutWorkerList, settledScouts);
       task.scouts = scouts.map((scout) => ({
         worker: workerLabelFor(scout),
         status: scout.status,
@@ -1556,7 +2203,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       .map(workerLabelFor)
       .filter((label) => label?.startsWith("builder-"));
     if (builderWorkerList.length) {
-      await Promise.all(
+      const settledBuilders = await Promise.allSettled(
         builderWorkerList.map((label) =>
           runCursorWorker(config, workspaceRoot, task, label, { plannerOutput: planner.finalOutput })
         )
@@ -1565,7 +2212,12 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
         return markCancelled(config, workspaceRoot, task);
       }
 
-      for (const label of builderWorkerList) {
+      const builders = settledWorkers(task, builderWorkerList, settledBuilders);
+      for (const worker of builders) {
+        const label = workerLabelFor(worker);
+        if (!worker.worktree || !label) {
+          continue;
+        }
         collectCandidatePatch(config, workspaceRoot, task, label);
       }
       task.status = "patches-collected";
@@ -1589,7 +2241,7 @@ export async function runTaskWorkflow(config, workspaceRoot, taskId) {
       return markCancelled(config, workspaceRoot, task);
     }
     task.recommendedCandidateId = extractRecommendedCandidate(task);
-    task.status = task.workers.some((worker) => worker.status === "failed") ? "failed" : "completed";
+    task.status = terminalWorkflowStatus(task);
     task.completedAt = new Date().toISOString();
     delete task.backgroundPid;
     saveTask(config, workspaceRoot, task);
@@ -1640,8 +2292,12 @@ export function createResearchTask(config, workspaceRoot, question, options = {}
     review: false,
     builders: 0,
     scouts: 0,
-    workers: options.workers ?? 2,
-    focus: options.focus ?? null
+    workers: options.workers ?? defaultResearchWorkerCount(options),
+    focus: options.focus ?? null,
+    pack: options.pack ?? null,
+    angles: options.angles ?? null,
+    researchPlan: options.researchPlan ?? null,
+    researchPlanFile: options.researchPlanFile ?? null
   });
 }
 
@@ -1649,16 +2305,16 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function extractRecommendedCandidate(task) {
+function recommendedCandidateDecision(task) {
   if (task.recommendedCandidateId) {
     const existing = (task.candidates ?? []).find((candidate) => candidate.candidateId === task.recommendedCandidateId);
     if (existing) {
-      return task.recommendedCandidateId;
+      return { candidateId: task.recommendedCandidateId, ambiguousCandidateIds: [] };
     }
   }
   const notes = task.reviewer?.notes ?? "";
   if (!notes.trim() || !task.candidates?.length) {
-    return null;
+    return { candidateId: null, ambiguousCandidateIds: [] };
   }
 
   const lines = notes
@@ -1680,17 +2336,25 @@ export function extractRecommendedCandidate(task) {
 
   if (recommendations.length) {
     recommendations.sort((a, b) => b.score - a.score);
-    const [first, second] = recommendations;
-    if (!second || first.score > second.score) {
-      return first.candidate.candidateId;
+    const topScore = recommendations[0].score;
+    const topCandidateIds = recommendations
+      .filter((recommendation) => recommendation.score === topScore)
+      .map((recommendation) => recommendation.candidate.candidateId);
+    if (topCandidateIds.length === 1) {
+      return { candidateId: topCandidateIds[0], ambiguousCandidateIds: [] };
     }
+    return { candidateId: null, ambiguousCandidateIds: topCandidateIds };
   }
 
   const withPatch = task.candidates.filter((candidate) => candidate.patchFile && candidate.status === "completed");
   if (withPatch.length === 1) {
-    return withPatch[0].candidateId;
+    return { candidateId: withPatch[0].candidateId, ambiguousCandidateIds: [] };
   }
-  return null;
+  return { candidateId: null, ambiguousCandidateIds: [] };
+}
+
+export function extractRecommendedCandidate(task) {
+  return recommendedCandidateDecision(task).candidateId;
 }
 
 function verifierAgent(config) {
@@ -1752,15 +2416,39 @@ function classifyCheckFailure(candidateCheck, baselineCheck) {
 }
 
 function baselineWorktreePath(config, workspaceRoot, task) {
-  return statePath(config, workspaceRoot, "worktrees", task.taskId, "__baseline__");
+  return statePath(config, workspaceRoot, "worktrees", assertSafeTaskId(task.taskId), "__baseline__");
 }
 
 function createBaselineWorktree(config, workspaceRoot, task) {
   const baselineDir = baselineWorktreePath(config, workspaceRoot, task);
   fs.mkdirSync(path.dirname(baselineDir), { recursive: true });
-  if (!fs.existsSync(baselineDir)) {
-    runGit(task.gitRoot, ["worktree", "add", "--detach", baselineDir, task.baseSha]);
+  if (fs.existsSync(baselineDir)) {
+    removeWorktree(task.gitRoot ?? workspaceRoot, baselineDir);
+    if (task.gitRoot) {
+      runGit(task.gitRoot, ["worktree", "prune"], { allowFailure: true });
+    }
   }
+  if (task.options?.syntheticBase || task.baseIsEmptyTree) {
+    fs.mkdirSync(baselineDir, { recursive: true });
+    runGit(baselineDir, ["init", "-q"]);
+    for (const relativeFilePath of snapshotFileList(task.gitRoot)) {
+      copyFileIntoSnapshot(task.gitRoot, baselineDir, relativeFilePath);
+    }
+    runGit(baselineDir, ["add", "-A"]);
+    runGit(baselineDir, [
+      "-c",
+      "user.name=Composer Swarm",
+      "-c",
+      "user.email=composer-swarm@example.invalid",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "composer-swarm synthetic baseline"
+    ]);
+    return baselineDir;
+  }
+  runGit(task.gitRoot, ["worktree", "add", "--detach", baselineDir, task.baseSha]);
   return baselineDir;
 }
 
@@ -1825,21 +2513,43 @@ export function verifyCandidate(config, workspaceRoot, taskId, requestedCandidat
   return { task, candidate, check: classified, lines };
 }
 
-export function verifyCandidates(config, workspaceRoot, taskId, options = {}) {
+export function verifyCandidatesResult(config, workspaceRoot, taskId, options = {}) {
   const task = loadTask(config, workspaceRoot, taskId);
   if (!task.candidates?.length) {
     throw new Error(`Task ${taskId} has no candidates to verify.`);
   }
   const outputs = [];
+  const results = [];
+  const skipped = [];
   for (const candidate of task.candidates) {
+    if (candidate.status !== "completed") {
+      const reason = `candidate status ${candidate.status ?? "unknown"}`;
+      skipped.push({ candidateId: candidate.candidateId, reason });
+      outputs.push(`Skipped ${candidate.candidateId}: ${reason}.`);
+      continue;
+    }
     if (!candidate.worktree) {
-      outputs.push(`Skipped ${candidate.candidateId}: no worktree.`);
+      const reason = "no worktree";
+      skipped.push({ candidateId: candidate.candidateId, reason });
+      outputs.push(`Skipped ${candidate.candidateId}: ${reason}.`);
       continue;
     }
     const result = verifyCandidate(config, workspaceRoot, taskId, candidate.candidateId, options);
+    results.push(result);
     outputs.push(result.lines.join("\n"));
   }
-  return outputs.join("\n\n");
+  const output = outputs.join("\n\n");
+  return {
+    task: loadTask(config, workspaceRoot, taskId),
+    results,
+    skipped,
+    output,
+    failed: skipped.length > 0 || results.some((result) => result.check?.status === "failed")
+  };
+}
+
+export function verifyCandidates(config, workspaceRoot, taskId, options = {}) {
+  return verifyCandidatesResult(config, workspaceRoot, taskId, options).output;
 }
 
 function formatCheckSummary(checks) {
@@ -1882,6 +2592,54 @@ export function formatCandidateComparison(task) {
   return lines.join("\n");
 }
 
+function candidateSummary(task) {
+  const candidates = task.candidates ?? [];
+  const recommendation = recommendedCandidateDecision(task);
+  const statusCounts = {};
+  const checkCounts = {
+    total: 0,
+    passed: 0,
+    failed: 0,
+    baseline: 0,
+    candidateSpecific: 0,
+    unclassified: 0,
+    uncheckedCandidates: 0
+  };
+  for (const candidate of candidates) {
+    const status = candidate.status ?? "unknown";
+    statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+    const checks = candidate.checks ?? [];
+    if (!checks.length) {
+      checkCounts.uncheckedCandidates += 1;
+    }
+    for (const check of checks) {
+      checkCounts.total += 1;
+      if (check.status === "passed") {
+        checkCounts.passed += 1;
+      } else if (check.status === "failed") {
+        checkCounts.failed += 1;
+      }
+      if (check.classification === "baseline") {
+        checkCounts.baseline += 1;
+      } else if (check.classification === "candidate-specific") {
+        checkCounts.candidateSpecific += 1;
+      } else if (check.status !== "passed") {
+        checkCounts.unclassified += 1;
+      }
+    }
+  }
+  return {
+    total: candidates.length,
+    completed: statusCounts.completed ?? 0,
+    failed: statusCounts.failed ?? 0,
+    withPatch: candidates.filter((candidate) => candidate.patchFile).length,
+    statusCounts,
+    checks: checkCounts,
+    recommendedCandidateId: recommendation.candidateId,
+    ambiguousRecommendedCandidateIds: recommendation.ambiguousCandidateIds
+  };
+}
+
 function reviewerNotesExcerpt(notes, maxLen = 400) {
   const compact = String(notes ?? "")
     .split(/\r?\n/)
@@ -1896,11 +2654,11 @@ function reviewerNotesExcerpt(notes, maxLen = 400) {
 
 function taskGuidance(task) {
   const lines = [];
-  if (task.options?.research && (task.status === "completed" || task.status === "failed")) {
+  if (task.options?.research && (task.status === "completed" || task.status === "partial" || task.status === "failed")) {
     lines.push(`Inspect: composer-swarm result ${task.taskId} --verbose`);
     lines.push("Cross-check important research claims before acting.");
     lines.push(`Cleanup: composer-swarm cleanup ${task.taskId}`);
-  } else if (task.status === "completed" || task.status === "patches-collected") {
+  } else if (task.status === "completed" || task.status === "partial" || task.status === "patches-collected") {
     lines.push(`Inspect: composer-swarm result ${task.taskId}`);
     if (task.recommendedCandidateId) {
       lines.push(`Apply recommended: composer-swarm apply ${task.taskId} --recommended`);
@@ -1958,6 +2716,15 @@ function taskOutputCount(task) {
   return task.candidates?.length ?? 0;
 }
 
+function repoContextMetadata(task) {
+  const context = task.repoContext ?? task.contextCache;
+  if (!context) {
+    return null;
+  }
+  const { text, ...metadata } = context;
+  return metadata;
+}
+
 export function formatTaskStatus(task) {
   const lines = [
     `Task: ${task.taskId}`,
@@ -1969,6 +2736,19 @@ export function formatTaskStatus(task) {
   ];
   if (task.options?.snapshotCurrent) {
     lines.push(`Snapshot: current checkout (${task.options.snapshotReason ?? "requested"})`);
+  }
+  if (task.options?.researchAngles?.length) {
+    lines.push(`Research angles: ${task.options.researchAngles.join(" | ")}`);
+  }
+  if (task.options?.researchPlan) {
+    lines.push(`Research plan: ${task.options.researchPlanFile ?? "inline"}`);
+  }
+  if (task.options?.implementationPlan) {
+    lines.push(`Implementation plan: ${task.options.implementationPlanFile ?? "inline host plan"}`);
+  }
+  const repoContext = task.repoContext ?? task.contextCache;
+  if (repoContext) {
+    lines.push(`Repo context: ${repoContext.fileCount ?? 0} files, ${repoContext.bytes ?? 0} bytes`);
   }
   if (task.error) {
     lines.push(`Error: ${task.error}`);
@@ -1992,7 +2772,8 @@ export function formatTaskStatus(task) {
       lines.push("- pending");
     } else {
       for (const entry of task.research) {
-        lines.push(`- ${entry.worker}: ${entry.status}`);
+        const angle = entry.angle ? ` (angle=${entry.angle})` : "";
+        lines.push(`- ${entry.worker}: ${entry.status}${angle}`);
       }
     }
     lines.push("", "Next steps:");
@@ -2022,11 +2803,99 @@ export function formatTaskStatus(task) {
   return lines.join("\n");
 }
 
-export function renderStatus(config, workspaceRoot, taskId = null) {
-  if (taskId) {
-    return formatTaskStatus(loadTask(config, workspaceRoot, taskId));
+function workerStatusCounts(workers = []) {
+  const counts = {};
+  for (const worker of workers) {
+    const status = worker.status ?? "unknown";
+    counts[status] = (counts[status] ?? 0) + 1;
   }
-  return formatTaskList(listTasks(config, workspaceRoot));
+  return counts;
+}
+
+function taskStatusJson(task) {
+  const snapshot = task.options?.snapshotCurrent
+    ? {
+        reason: task.options.snapshotReason ?? null,
+        includes_untracked: Boolean(task.options.snapshotIncludesUntracked),
+        synthetic_base: Boolean(task.options.syntheticBase || task.baseIsEmptyTree)
+      }
+    : null;
+  const payload = {
+    taskId: task.taskId,
+    status: task.status,
+    mode: resultMode(task),
+    objective: task.objective,
+    createdAt: task.createdAt ?? null,
+    updatedAt: task.updatedAt ?? null,
+    baseSha: task.baseSha ?? null,
+    baseBranch: task.baseBranch ?? null,
+    backgroundPid: task.backgroundPid ?? null,
+    repoContext: repoContextMetadata(task),
+    snapshot,
+    outputCount: taskOutputCount(task),
+    workerStatusCounts: workerStatusCounts(task.workers),
+    workers: (task.workers ?? []).map((worker) => ({
+      label: workerLabelFor(worker),
+      status: worker.status,
+      canEdit: Boolean(worker.canEdit),
+      lastOutputAt: worker.lastOutputAt ?? null,
+      exitCode: worker.exitCode ?? null,
+      error: worker.error ?? null
+    })),
+    guidance: taskGuidance(task)
+  };
+  if (task.options?.research) {
+    payload.research = (task.research ?? []).map((entry) => ({
+      worker: entry.worker,
+      angle: entry.angle ?? null,
+      status: entry.status,
+      error: entry.error ?? null
+    }));
+  } else if (task.options?.review) {
+    payload.reviewer = task.reviewer
+      ? {
+          status: task.reviewer.status,
+          error: task.reviewer.error ?? null
+        }
+      : null;
+    payload.scouts = (task.scouts ?? []).map((scout) => ({
+      worker: workerLabelFor(scout),
+      status: scout.status,
+      error: scout.error ?? null
+    }));
+  } else {
+    payload.candidateSummary = candidateSummary(task);
+    payload.recommendedCandidateId = task.recommendedCandidateId ?? extractRecommendedCandidate(task);
+  }
+  return payload;
+}
+
+function formatStatusJson(tasks, workspaceRoot, taskId = null) {
+  const payload = {
+    schema: "composer-swarm.status.v1",
+    workspaceRoot,
+    taskId: taskId ?? null,
+    tasks: tasks.map(taskStatusJson)
+  };
+  if (taskId) {
+    payload.task = payload.tasks[0] ?? null;
+  }
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+export function renderStatus(config, workspaceRoot, taskId = null, options = {}) {
+  if (taskId) {
+    const task = recoverStaleBackgroundTask(config, workspaceRoot, loadTask(config, workspaceRoot, taskId));
+    if (options.json) {
+      return formatStatusJson([task], workspaceRoot, taskId);
+    }
+    return formatTaskStatus(task);
+  }
+  const tasks = listTasks(config, workspaceRoot).map((task) => recoverStaleBackgroundTask(config, workspaceRoot, task));
+  if (options.json) {
+    return formatStatusJson(tasks, workspaceRoot, null);
+  }
+  return formatTaskList(tasks);
 }
 
 function formatChecks(checks, verbose = false) {
@@ -2047,9 +2916,897 @@ function formatChecks(checks, verbose = false) {
   return lines.join("\n");
 }
 
+function scoreReportCandidate(text, event) {
+  const report = String(text ?? "").trim();
+  if (!report) {
+    return -100;
+  }
+  let score = 0;
+  const structured = /^Severity:\s*/im.test(report) || /\bIssue:\s*/i.test(report) || /\bEvidence:\s*/i.test(report);
+  if (isFinalOutputEvent(event)) {
+    score += 60;
+  }
+  const type = String(event?.type ?? event?.event ?? event?.kind ?? "").toLowerCase();
+  if (type.includes("tool")) {
+    score += 40;
+  }
+  if (structured) {
+    score += 90;
+  }
+  if (!structured && report.length < 40) {
+    score -= 50;
+  }
+  if (/You are a Composer worker|Rules:\n- Work only in the workspace/.test(report)) {
+    score -= 100;
+  }
+  if (type === "input" || type === "progress") {
+    score -= 20;
+  }
+  return score + Math.min(report.length, 2000) / 2000;
+}
+
+function reportTextFromTranscript(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return null;
+  }
+  const candidates = [];
+  for (const entry of readTranscriptEvents(filePath)) {
+    if (entry.type !== "worker-output") {
+      continue;
+    }
+    const event = entry.event ?? null;
+    const text = event ? textFromJson(event) : entry.line ?? "";
+    if (!text?.trim()) {
+      continue;
+    }
+    candidates.push({ text: text.trim(), score: scoreReportCandidate(text, event) });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.score > -50 ? candidates[0].text : null;
+}
+
+function shouldUseRecoveredReport(current, recovered) {
+  if (!recovered?.trim()) {
+    return false;
+  }
+  const existing = String(current ?? "").trim();
+  if (!existing || /\((reviewer|scout|research worker) did not provide notes\)/i.test(existing)) {
+    return true;
+  }
+  const recoveredLooksStructured = /^Severity:\s*/im.test(recovered) || /\bIssue:\s*/i.test(recovered);
+  const existingLooksStructured = /^Severity:\s*/im.test(existing) || /\bIssue:\s*/i.test(existing);
+  return recoveredLooksStructured && !existingLooksStructured;
+}
+
+function taskWithRecoveredReports(config, workspaceRoot, task) {
+  const copy = JSON.parse(JSON.stringify(task));
+  if (copy.reviewer?.transcript) {
+    const recovered = reportTextFromTranscript(copy.reviewer.transcript);
+    if (shouldUseRecoveredReport(copy.reviewer.notes, recovered)) {
+      copy.reviewer.notes = recovered;
+    }
+  }
+  if (copy.scouts?.length) {
+    for (const scout of copy.scouts) {
+      const recovered = reportTextFromTranscript(scout.transcript);
+      if (shouldUseRecoveredReport(scout.notes, recovered)) {
+        scout.notes = recovered;
+      }
+    }
+  }
+  if (copy.research?.length) {
+    for (const research of copy.research) {
+      const recovered = reportTextFromTranscript(research.transcript);
+      if (shouldUseRecoveredReport(research.notes, recovered)) {
+        research.notes = recovered;
+      }
+    }
+  }
+  return copy;
+}
+
+function parseFileLine(value) {
+  let text = String(value ?? "").trim();
+  if (!text) {
+    return { file: null, line: null };
+  }
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
+  const lMatch = /\bL(\d+)(?:\s*[-–]\s*\d+)?\b/i.exec(text);
+  if (lMatch) {
+    return { file: text.slice(0, lMatch.index).trim(), line: Number(lMatch[1]) };
+  }
+  const match = /^(.*?):(\d+)(?:[-–]\d+)?(?::\d+)?$/.exec(text);
+  if (!match) {
+    return { file: text, line: null };
+  }
+  return { file: match[1], line: Number(match[2]) };
+}
+
+function verifiedByWorker(verification, evidence) {
+  const text = `${verification ?? ""} ${evidence ?? ""}`.toLowerCase();
+  if (!text.trim()) {
+    return false;
+  }
+  if (/\bunverified\b|blocked|not run|could not|unable|no test|not executed/.test(text)) {
+    return false;
+  }
+  return /\btests?_run\b|\bsource_read\b|\bdocs?_read\b|\bcommand_run\b|\bexecuted\b|\bverified\b/.test(text);
+}
+
+function withVerificationMetadata(finding) {
+  const normalized = {
+    ...finding,
+    verified_by_worker: verifiedByWorker(finding.verification, finding.evidence)
+  };
+  normalized.verification_tier = verificationTier(normalized);
+  return normalized;
+}
+
+function appendParsedField(target, field, value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return;
+  }
+  target[field] = target[field] ? `${target[field]}\n${text}` : text;
+}
+
+function continuationValue(rawLine, trimmedLine) {
+  if (!trimmedLine) {
+    return null;
+  }
+  if (/^\s+/.test(rawLine) || /^(?:[-*]\s+|\d+[.)]\s+)/.test(trimmedLine)) {
+    return trimmedLine;
+  }
+  return null;
+}
+
+function normalizeFieldKey(key) {
+  return String(key ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "_");
+}
+
+function stripMarkdownFieldMarkup(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/^`(.+)`$/, "$1")
+    .trim();
+}
+
+function parseStructuredFieldLine(rawLine) {
+  const line = String(rawLine ?? "").trim();
+  if (!line) {
+    return null;
+  }
+  if (line.startsWith("|")) {
+    const cells = line.split("|").slice(1, line.endsWith("|") ? -1 : undefined).map((cell) => cell.trim());
+    if (cells.length < 2 || cells.every((cell) => /^:?-{3,}:?$/.test(cell))) {
+      return null;
+    }
+    const keyText = stripMarkdownFieldMarkup(cells[0]);
+    const value = stripMarkdownFieldMarkup(cells.slice(1).join(" | "));
+    if (!keyText || /^:?-{3,}:?$/.test(keyText) || normalizeFieldKey(keyText) === "field") {
+      return null;
+    }
+    return { key: normalizeFieldKey(keyText), value };
+  }
+  const plain = stripMarkdownFieldMarkup(line.replace(/^\s*[-*]\s+/, ""));
+  const match = /^([A-Za-z][A-Za-z _-]*):\s*(.*)$/.exec(plain);
+  if (!match) {
+    return null;
+  }
+  return { key: normalizeFieldKey(match[1]), value: stripMarkdownFieldMarkup(match[2]) };
+}
+
+export function parseReviewFindings(text, options = {}) {
+  const sourceWorker = options.sourceWorker ?? "reviewer";
+  const findings = [];
+  let current = null;
+  let activeField = null;
+
+  function finishCurrent() {
+    if (!current) {
+      return;
+    }
+    const fileLine = parseFileLine(current.file);
+    findings.push(withVerificationMetadata({
+      severity: current.severity ?? "unknown",
+      file: fileLine.file,
+      line: current.line ?? fileLine.line,
+      claim: current.claim ?? current.issue ?? "",
+      evidence: current.evidence ?? "",
+      confidence: current.confidence ?? "unknown",
+      verification: current.verification ?? "unverified: not_declared",
+      source_worker: sourceWorker,
+      suggested_fix: current.suggestedFix ?? "",
+      why_it_matters: current.whyItMatters ?? ""
+    }));
+    current = null;
+    activeField = null;
+  }
+
+  for (const rawLine of String(text ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const field = parseStructuredFieldLine(rawLine);
+    if (!field) {
+      const continuation = current && activeField ? continuationValue(rawLine, line) : null;
+      if (continuation) {
+        appendParsedField(current, activeField, continuation);
+      } else {
+        activeField = null;
+      }
+      continue;
+    }
+    const { key, value } = field;
+    if (key === "severity") {
+      finishCurrent();
+      current = { severity: value.toLowerCase() };
+      activeField = null;
+      continue;
+    }
+    if (!current && [
+      "file",
+      "path",
+      "location",
+      "line",
+      "line_number",
+      "issue",
+      "claim",
+      "finding",
+      "problem",
+      "evidence",
+      "source"
+    ].includes(key)) {
+      current = {};
+    }
+    if (!current) {
+      activeField = null;
+      continue;
+    }
+    if (key === "file" || key === "path" || key === "location") {
+      current.file = value;
+      activeField = null;
+    } else if (key === "line" || key === "line_number") {
+      const lineNumber = Number(value);
+      current.line = Number.isFinite(lineNumber) ? lineNumber : null;
+      activeField = null;
+    } else if (key === "issue" || key === "claim" || key === "finding" || key === "problem") {
+      appendParsedField(current, "claim", value);
+      activeField = "claim";
+    } else if (key === "evidence" || key === "source") {
+      appendParsedField(current, "evidence", value);
+      activeField = "evidence";
+    } else if (key === "confidence") {
+      current.confidence = value.toLowerCase();
+      activeField = null;
+    } else if (key === "verification" || key === "verified") {
+      appendParsedField(current, "verification", value);
+      activeField = "verification";
+    } else if (key === "suggested_fix" || key === "fix" || key === "recommendation") {
+      appendParsedField(current, "suggestedFix", value);
+      activeField = "suggestedFix";
+    } else if (key === "why_it_matters" || key === "impact" || key === "risk") {
+      appendParsedField(current, "whyItMatters", value);
+      activeField = "whyItMatters";
+    } else {
+      activeField = null;
+    }
+  }
+  finishCurrent();
+  return findings.filter((finding) => finding.claim || finding.evidence || finding.file);
+}
+
+function reviewFindingsForTask(task) {
+  const entries = [];
+  if (task.reviewer?.notes) {
+    entries.push(...parseReviewFindings(task.reviewer.notes, { sourceWorker: "reviewer" }));
+  }
+  for (const scout of task.scouts ?? []) {
+    entries.push(...parseReviewFindings(scout.notes, { sourceWorker: workerLabelFor(scout) ?? "scout" }));
+  }
+  return entries;
+}
+
+export function parseResearchFindings(text, options = {}) {
+  const sourceWorker = options.sourceWorker ?? "research";
+  const sourceAngle = options.angle ?? null;
+  const findings = [];
+  let current = null;
+  let defaultConfidence = null;
+  let declaredAngle = null;
+  let activeField = null;
+
+  function finishCurrent() {
+    if (!current) {
+      return;
+    }
+    findings.push(withVerificationMetadata({
+      claim: current.claim ?? "",
+      evidence: current.evidence ?? "",
+      why_it_matters: current.whyItMatters ?? "",
+      follow_up: current.followUp ?? "",
+      confidence: current.confidence ?? defaultConfidence ?? "unknown",
+      verification: current.verification ?? "unverified: not_declared",
+      source_worker: sourceWorker,
+      angle: current.angle ?? declaredAngle ?? sourceAngle
+    }));
+    current = null;
+    activeField = null;
+  }
+
+  for (const rawLine of String(text ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const findingMatch = /^-?\s*Finding:\s*(.*)$/i.exec(line);
+    if (findingMatch) {
+      finishCurrent();
+      current = { claim: findingMatch[1].trim() };
+      activeField = "claim";
+      continue;
+    }
+    const field = parseStructuredFieldLine(rawLine);
+    if (!field) {
+      const continuation = current && activeField ? continuationValue(rawLine, line) : null;
+      if (continuation) {
+        appendParsedField(current, activeField, continuation);
+      } else {
+        activeField = null;
+      }
+      continue;
+    }
+    const { key, value } = field;
+    if (key === "confidence" && !current) {
+      defaultConfidence = value.toLowerCase();
+      activeField = null;
+      continue;
+    }
+    if (key === "angle" && !current) {
+      declaredAngle = value;
+      activeField = null;
+      continue;
+    }
+    if (!current) {
+      activeField = null;
+      continue;
+    }
+    if (key === "claim" || key === "issue" || key === "problem") {
+      appendParsedField(current, "claim", value);
+      activeField = "claim";
+    } else if (key === "evidence" || key === "source") {
+      appendParsedField(current, "evidence", value);
+      activeField = "evidence";
+    } else if (key === "why_it_matters" || key === "impact" || key === "risk") {
+      appendParsedField(current, "whyItMatters", value);
+      activeField = "whyItMatters";
+    } else if (key === "follow_up" || key === "followup" || key === "next_step") {
+      appendParsedField(current, "followUp", value);
+      activeField = "followUp";
+    } else if (key === "confidence") {
+      current.confidence = value.toLowerCase();
+      activeField = null;
+    } else if (key === "verification" || key === "verified") {
+      appendParsedField(current, "verification", value);
+      activeField = "verification";
+    } else if (key === "angle") {
+      current.angle = value;
+      activeField = null;
+    } else {
+      activeField = null;
+    }
+  }
+  finishCurrent();
+  return findings.filter((finding) => finding.claim || finding.evidence);
+}
+
+function researchFindingsForTask(task) {
+  const entries = [];
+  for (const research of task.research ?? []) {
+    entries.push(
+      ...parseResearchFindings(research.notes, {
+        sourceWorker: research.worker,
+        angle: research.angle ?? null
+      })
+    );
+  }
+  return entries;
+}
+
+function resultMode(task) {
+  if (task.options?.research) {
+    return "research";
+  }
+  if (task.options?.review) {
+    return "review";
+  }
+  return "team";
+}
+
+function findingsForTask(task) {
+  if (task.options?.research) {
+    return researchFindingsForTask(task);
+  }
+  if (task.options?.review) {
+    return reviewFindingsForTask(task);
+  }
+  return [];
+}
+
+function verificationText(finding) {
+  const text = String(finding.verification ?? "").trim();
+  return text || "unverified: not_declared";
+}
+
+function verificationTier(finding) {
+  const text = verificationText(finding).toLowerCase();
+  if (!finding.verified_by_worker) {
+    return "unverified";
+  }
+  if (/\btests?_run\b|\bcommand_run\b|\bexecuted\b/.test(text)) {
+    return "executed";
+  }
+  if (/\bsource_read\b|\bdocs?_read\b/.test(text)) {
+    return "source";
+  }
+  return "declared";
+}
+
+function verificationSignal(finding) {
+  const text = verificationText(finding).toLowerCase();
+  return text.split(/[;,]/)[0]?.trim() || "unverified: not_declared";
+}
+
+function verificationCounts(findings) {
+  const counts = {
+    executed: 0,
+    source: 0,
+    declared: 0,
+    unverified: 0
+  };
+  const signals = new Map();
+  for (const finding of findings) {
+    counts[verificationTier(finding)] += 1;
+    const signal = verificationSignal(finding);
+    signals.set(signal, (signals.get(signal) ?? 0) + 1);
+  }
+  return { counts, signals };
+}
+
+function sourceLabelForFinding(finding) {
+  return [finding.source_worker, finding.angle].filter(Boolean).join("; ") || "unknown";
+}
+
+function findingLocation(finding) {
+  const location = [finding.file, finding.line].filter((part) => part !== null && part !== undefined).join(":");
+  return location || "(no file)";
+}
+
+function normalizedFindingKey(finding) {
+  const claim = String(finding.claim ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return [finding.file ?? "", finding.line ?? "", claim || String(finding.evidence ?? "").toLowerCase()].join("|");
+}
+
+function groupedFindings(findings) {
+  const groups = new Map();
+  for (const finding of findings) {
+    const key = normalizedFindingKey(finding);
+    const source = sourceLabelForFinding(finding);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        finding,
+        findings: [],
+        sources: new Set()
+      });
+    }
+    const group = groups.get(key);
+    group.findings.push(finding);
+    group.sources.add(source);
+  }
+  return [...groups.values()];
+}
+
+function formatSignalCounts(signals) {
+  if (!signals.size) {
+    return "none";
+  }
+  return [...signals.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([signal, count]) => `${signal}=${count}`)
+    .join(", ");
+}
+
+function signalCountsObject(signals) {
+  return Object.fromEntries([...signals.entries()].sort((a, b) => a[0].localeCompare(b[0])));
+}
+
+function sourceFindings(findings, sourceWorker) {
+  return findings.filter((finding) => finding.source_worker === sourceWorker);
+}
+
+function coverageCounts(findings) {
+  const { counts } = verificationCounts(findings);
+  return {
+    findings: findings.length,
+    executed: counts.executed,
+    source: counts.source,
+    declared: counts.declared,
+    unverified: counts.unverified
+  };
+}
+
+function synthesisCoverageEntries(task, findings) {
+  const entries = [];
+  const seen = new Set();
+  if (task.options?.research) {
+    for (const entry of task.research ?? []) {
+      const worker = entry.worker ?? "research";
+      seen.add(worker);
+      entries.push({
+        worker,
+        status: entry.status ?? "unknown",
+        angle: entry.angle ?? null,
+        recovered: false,
+        ...coverageCounts(sourceFindings(findings, worker))
+      });
+    }
+  } else if (task.options?.review) {
+    if (task.reviewer) {
+      seen.add("reviewer");
+      entries.push({
+        worker: "reviewer",
+        status: task.reviewer.status ?? "unknown",
+        angle: null,
+        recovered: false,
+        ...coverageCounts(sourceFindings(findings, "reviewer"))
+      });
+    }
+    for (const scout of task.scouts ?? []) {
+      const worker = workerLabelFor(scout) ?? "scout";
+      seen.add(worker);
+      entries.push({
+        worker,
+        status: scout.status ?? "unknown",
+        angle: null,
+        recovered: false,
+        ...coverageCounts(sourceFindings(findings, worker))
+      });
+    }
+  }
+  for (const finding of findings) {
+    const worker = finding.source_worker ?? "unknown";
+    if (!seen.has(worker)) {
+      seen.add(worker);
+      entries.push({
+        worker,
+        status: "recovered",
+        angle: null,
+        recovered: true,
+        ...coverageCounts(sourceFindings(findings, worker))
+      });
+    }
+  }
+  return entries;
+}
+
+function synthesisCoverageLines(task, findings) {
+  const entries = synthesisCoverageEntries(task, findings);
+  if (!entries.length) {
+    return ["- no worker outputs recorded yet"];
+  }
+  const lines = [];
+  for (const entry of entries) {
+    if (entry.recovered) {
+      lines.push(`- ${entry.worker}: recovered; findings=${entry.findings}; executed=${entry.executed}; source=${entry.source}; declared=${entry.declared}; unverified=${entry.unverified}`);
+      continue;
+    }
+    const angle = entry.angle ? `; angle=${entry.angle}` : "";
+    lines.push(
+      `- ${entry.worker}: ${entry.status}${angle}; findings=${entry.findings}; executed=${entry.executed}; source=${entry.source}; declared=${entry.declared}; unverified=${entry.unverified}`
+    );
+  }
+  if (!lines.length) {
+    lines.push("- no worker outputs recorded yet");
+  }
+  return lines;
+}
+
+function formatSynthesisFindings(findings) {
+  const groups = groupedFindings(findings);
+  if (!groups.length) {
+    return ["- none parsed"];
+  }
+  const severityRank = new Map([
+    ["critical", 0],
+    ["high", 1],
+    ["medium", 2],
+    ["low", 3],
+    ["info", 4],
+    ["unknown", 5]
+  ]);
+  groups.sort((a, b) => {
+    const aSeverity = severityRank.get(a.finding.severity ?? "unknown") ?? 5;
+    const bSeverity = severityRank.get(b.finding.severity ?? "unknown") ?? 5;
+    if (aSeverity !== bSeverity) {
+      return aSeverity - bSeverity;
+    }
+    return String(a.finding.claim ?? "").localeCompare(String(b.finding.claim ?? ""));
+  });
+  const lines = [];
+  for (const group of groups.slice(0, 20)) {
+    const finding = group.finding;
+    const tierCounts = verificationCounts(group.findings).counts;
+    const tiers = [
+      tierCounts.executed ? `executed=${tierCounts.executed}` : null,
+      tierCounts.source ? `source=${tierCounts.source}` : null,
+      tierCounts.declared ? `declared=${tierCounts.declared}` : null,
+      tierCounts.unverified ? `unverified=${tierCounts.unverified}` : null
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const severity = finding.severity ? `${finding.severity} ` : "";
+    const sources = [...group.sources].slice(0, 4).join(" | ");
+    const sourceSuffix = group.sources.size > 4 ? `${sources} | +${group.sources.size - 4} more` : sources;
+    lines.push(
+      `- ${severity}${findingLocation(finding)} ${finding.claim || "(no claim)"} [${finding.confidence ?? "unknown"}; ${tiers || "no verification"}; ${sourceSuffix}]`
+    );
+    if (finding.evidence) {
+      lines.push(`  Evidence: ${finding.evidence}`);
+    }
+    if (finding.follow_up) {
+      lines.push(`  Follow-up: ${finding.follow_up}`);
+    }
+  }
+  if (groups.length > 20) {
+    lines.push(`- ${groups.length - 20} additional parsed finding group(s) omitted from synthesis`);
+  }
+  return lines;
+}
+
+function synthesisFollowUpLines(mode, findings) {
+  const lines = [];
+  const unverified = findings.filter((finding) => verificationTier(finding) === "unverified");
+  const executed = findings.filter((finding) => verificationTier(finding) === "executed");
+  if (!findings.length) {
+    lines.push("- No parsed findings; inspect `result --verbose` before concluding workers found nothing.");
+  }
+  if (!executed.length) {
+    lines.push("- No parsed finding reports tests_run or command_run; run local checks for behavioral claims.");
+  }
+  if (unverified.length) {
+    const examples = unverified
+      .slice(0, 3)
+      .map((finding) => finding.claim || finding.evidence || "(no claim)")
+      .join("; ");
+    lines.push(`- Recheck ${unverified.length} unverified finding(s) before using them: ${examples}`);
+  }
+  if (mode === "review") {
+    const sourceOnlyReleaseRisks = findings.filter((finding) => {
+      const severity = String(finding.severity ?? "").toLowerCase();
+      return (severity === "critical" || severity === "high" || severity === "medium") && verificationTier(finding) !== "executed";
+    });
+    if (sourceOnlyReleaseRisks.length) {
+      lines.push(
+        `- Validate ${sourceOnlyReleaseRisks.length} high/medium review finding(s) with local reproduction or tests before treating them as release blockers.`
+      );
+    }
+  }
+  if (!lines.length) {
+    lines.push("- Cross-check cited files and commands in the main checkout before acting.");
+  }
+  return lines;
+}
+
+function synthesisMetadata(task, findings) {
+  const mode = resultMode(task);
+  const { counts, signals } = verificationCounts(findings);
+  return {
+    role: {
+      composerOutput: "scout",
+      mainModelReviewerOfRecord: true
+    },
+    workerCoverage: synthesisCoverageEntries(task, findings),
+    verificationSummary: {
+      totalFindings: findings.length,
+      executed: counts.executed,
+      source: counts.source,
+      declared: counts.declared,
+      unverified: counts.unverified,
+      signals: signalCountsObject(signals)
+    },
+    hostFollowUpChecks: synthesisFollowUpLines(mode, findings).map((line) => line.replace(/^- /, ""))
+  };
+}
+
+function formatSynthesisBrief(task) {
+  const mode = resultMode(task);
+  if (mode !== "review" && mode !== "research") {
+    return formatResult(task, { synthesis: false });
+  }
+  const findings = findingsForTask(task);
+  const { counts, signals } = verificationCounts(findings);
+  const lines = [
+    "Host synthesis brief",
+    `Task: ${task.taskId}`,
+    `Status: ${task.status}`,
+    `Mode: ${mode}`,
+    `${mode === "research" ? "Research question" : "Review objective"}: ${task.objective}`,
+    "",
+    "Role:",
+    "- Composer output is scout work for the host model.",
+    "- Main model remains reviewer of record; verify important claims before acting."
+  ];
+  if (task.options?.snapshotCurrent) {
+    lines.push(`- Snapshot: current checkout (${task.options.snapshotReason ?? "requested"})`);
+  }
+  if (task.options?.researchPack) {
+    lines.push(`- Research pack: ${task.options.researchPack}`);
+  }
+  if (task.options?.researchPlan) {
+    lines.push(`- Research plan: ${task.options.researchPlanFile ?? "inline"}`);
+  }
+  if (task.options?.researchAngles?.length) {
+    lines.push(`- Expected angles: ${task.options.researchAngles.join(" | ")}`);
+  }
+  const repoContext = task.repoContext ?? task.contextCache;
+  if (repoContext) {
+    lines.push(`- Repo context: ${repoContext.fileCount ?? 0} files, ${repoContext.bytes ?? 0} bytes`);
+  }
+  lines.push("");
+  lines.push("Coverage:");
+  lines.push(...synthesisCoverageLines(task, findings));
+  lines.push("");
+  lines.push("Verification summary:");
+  lines.push(`- Total parsed findings: ${findings.length}`);
+  lines.push(`- Executed tests/commands: ${counts.executed}`);
+  lines.push(`- Source/docs read only: ${counts.source}`);
+  lines.push(`- Worker-declared verification: ${counts.declared}`);
+  lines.push(`- Unverified or blocked: ${counts.unverified}`);
+  lines.push(`- Signals: ${formatSignalCounts(signals)}`);
+  lines.push("");
+  lines.push("Finding groups:");
+  lines.push(...formatSynthesisFindings(findings));
+  lines.push("");
+  lines.push("Host follow-up checks:");
+  lines.push(...synthesisFollowUpLines(mode, findings));
+  return lines.join("\n");
+}
+
+function formatFindingsOnly(task) {
+  const findings = task.options?.research ? researchFindingsForTask(task) : reviewFindingsForTask(task);
+  const lines = [`Task: ${task.taskId}`, `Status: ${task.status}`, "", "Findings:"];
+  if (!findings.length) {
+    lines.push("- none parsed");
+  } else {
+    for (const finding of findings) {
+      const location = [finding.file, finding.line].filter((part) => part !== null && part !== undefined).join(":");
+      const source = [finding.source_worker, finding.angle].filter(Boolean).join("; ");
+      const tier = finding.verification_tier ?? verificationTier(finding);
+      lines.push(
+        `- ${finding.severity ?? "research"} ${location || "(no file)"} ${finding.claim || "(no claim)"} [confidence=${finding.confidence}; tier=${tier}; verification=${finding.verification}${source ? `; ${source}` : ""}]`
+      );
+      if (finding.evidence) {
+        lines.push(`  Evidence: ${finding.evidence}`);
+      }
+      if (finding.follow_up) {
+        lines.push(`  Follow-up: ${finding.follow_up}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatResultJson(task, options = {}) {
+  const mode = resultMode(task);
+  const payload = {
+    schema: "composer-swarm.result.v1",
+    taskId: task.taskId,
+    status: task.status,
+    mode,
+    objective: task.objective,
+    baseSha: task.baseSha ?? null,
+    baseBranch: task.baseBranch ?? null,
+    repoContext: repoContextMetadata(task),
+    snapshot: task.options?.snapshotCurrent
+      ? {
+          reason: task.options.snapshotReason ?? null,
+          includes_untracked: Boolean(task.options.snapshotIncludesUntracked),
+          synthetic_base: Boolean(task.options.syntheticBase || task.baseIsEmptyTree)
+        }
+      : null
+  };
+  if (mode === "review") {
+    const findings = reviewFindingsForTask(task);
+    payload.findings = findings;
+    payload.synthesis = synthesisMetadata(task, findings);
+    payload.reviewer = task.reviewer
+      ? {
+          status: task.reviewer.status,
+          transcript: task.reviewer.transcript ?? null,
+          error: task.reviewer.error ?? null
+        }
+      : null;
+    payload.scouts = (task.scouts ?? []).map((scout) => ({
+      worker: workerLabelFor(scout),
+      status: scout.status,
+      transcript: scout.transcript ?? null,
+      error: scout.error ?? null
+    }));
+  } else if (mode === "research") {
+    payload.focus = task.options?.focus ?? null;
+    payload.researchPack = task.options?.researchPack ?? null;
+    payload.researchPlanFile = task.options?.researchPlanFile ?? null;
+    payload.researchPlan = task.options?.researchPlan ?? null;
+    payload.researchAngles = task.options?.researchAngles ?? [];
+    const findings = researchFindingsForTask(task);
+    payload.findings = findings;
+    payload.synthesis = synthesisMetadata(task, findings);
+    payload.research = (task.research ?? []).map((entry) => ({
+      worker: entry.worker,
+      angle: entry.angle ?? null,
+      status: entry.status,
+      confidence: /confidence:\s*(high|medium|low)/i.exec(entry.notes ?? "")?.[1]?.toLowerCase() ?? null,
+      transcript: entry.transcript ?? null,
+      notes: options.verbose ? entry.notes ?? "" : reviewerNotesExcerpt(entry.notes, 500),
+      error: entry.error ?? null
+    }));
+  } else {
+    payload.implementationPlanFile = task.options?.implementationPlanFile ?? null;
+    payload.implementationPlan = task.options?.implementationPlan ?? null;
+    payload.planner = task.planner
+      ? {
+          worker: task.planner.worker ?? null,
+          status: task.planner.status ?? null,
+          source: task.planner.source ?? null,
+          file: task.planner.file ?? null
+        }
+      : null;
+    payload.candidates = (task.candidates ?? []).map((candidate) => ({
+      candidateId: candidate.candidateId,
+      workerLabel: candidateWorkerLabel(candidate),
+      status: candidate.status,
+      changedFiles: candidate.changedFiles ?? [],
+      patchBytes: candidate.patchBytes ?? 0,
+      patchFile: candidate.patchFile ?? null,
+      checks: candidate.checks ?? []
+    }));
+    payload.reviewer = task.reviewer
+      ? {
+          worker: task.reviewer.worker ?? "reviewer",
+          status: task.reviewer.status ?? null,
+          transcript: task.reviewer.transcript ?? null,
+          error: task.reviewer.error ?? null,
+          notes: options.verbose ? task.reviewer.notes ?? "" : reviewerNotesExcerpt(task.reviewer.notes, 500)
+        }
+      : null;
+    payload.recommendedCandidateId = task.recommendedCandidateId ?? extractRecommendedCandidate(task);
+    payload.candidateSummary = candidateSummary(task);
+  }
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
 export function formatResult(task, options = {}) {
   const workspaceRoot = options.workspaceRoot ?? task.workspaceRoot ?? process.cwd();
   const verbose = Boolean(options.verbose);
+  if (options.json) {
+    return formatResultJson(task, { workspaceRoot, verbose });
+  }
+  if (options.findings) {
+    return task.options?.review || task.options?.research
+      ? formatFindingsOnly(task)
+      : formatResult(task, { ...options, findings: false });
+  }
+  if (options.synthesis) {
+    return task.options?.review || task.options?.research
+      ? formatSynthesisBrief(task)
+      : formatResult(task, { ...options, synthesis: false });
+  }
   if (task.options?.research) {
     return formatResearchResult(task, { workspaceRoot, verbose });
   }
@@ -2062,6 +3819,9 @@ export function formatResult(task, options = {}) {
     `Objective: ${task.objective}`,
     ""
   ];
+  if (task.options?.implementationPlan) {
+    lines.splice(3, 0, `Implementation plan: ${task.options.implementationPlanFile ?? "inline host plan"}`);
+  }
   if (!task.candidates?.length) {
     lines.push("No candidates have been collected yet.");
   } else {
@@ -2167,6 +3927,15 @@ function formatResearchResult(task, options = {}) {
   if (task.options?.focus) {
     lines.push(`Focus: ${task.options.focus}`);
   }
+  if (task.options?.researchPack) {
+    lines.push(`Pack: ${task.options.researchPack}`);
+  }
+  if (task.options?.researchPlan) {
+    lines.push(`Plan: ${task.options.researchPlanFile ?? "inline"}`);
+  }
+  if (task.options?.researchAngles?.length) {
+    lines.push(`Angles: ${task.options.researchAngles.join(" | ")}`);
+  }
   lines.push("", "Research outputs:");
   if (!task.research?.length) {
     lines.push("- none recorded yet");
@@ -2174,6 +3943,9 @@ function formatResearchResult(task, options = {}) {
     for (const entry of task.research) {
       lines.push("", `${workerDisplayName(entry.worker)}:`);
       lines.push(`Status: ${entry.status}`);
+      if (entry.angle) {
+        lines.push(`Angle: ${entry.angle}`);
+      }
       if (entry.error) {
         lines.push(`Error: ${entry.error}`);
       }
@@ -2201,7 +3973,7 @@ export function renderResult(config, workspaceRoot, taskId = null, options = {})
   if (!task) {
     return "No composer-swarm tasks found.";
   }
-  return formatResult(task, { workspaceRoot, ...options });
+  return formatResult(taskWithRecoveredReports(config, workspaceRoot, task), { workspaceRoot, ...options });
 }
 
 function transcriptEntriesForTask(config, workspaceRoot, task) {
@@ -2389,19 +4161,53 @@ export function renderLogs(config, workspaceRoot, taskId = null, options = {}) {
 
 function candidateMatches(candidate, requested) {
   const label = candidateWorkerLabel(candidate);
-  return candidate.candidateId === requested || label === requested || candidate.candidateId.endsWith(`-${requested}`);
+  return candidate.candidateId === requested || label === requested;
 }
 
 function findCandidate(task, requested) {
   return (task.candidates ?? []).find((candidate) => candidateMatches(candidate, requested)) ?? null;
 }
 
+function assertTaskBaseStillCurrent(task, workspaceRoot) {
+  const gitRoot = task.gitRoot ?? workspaceRoot;
+  const expected = task.baseSha ?? null;
+  if (!expected) {
+    return;
+  }
+  const current = gitHead(gitRoot, { allowUnborn: true });
+  const expectedEmptyTree = expected === EMPTY_TREE_SHA || task.baseIsEmptyTree || task.options?.syntheticBase;
+  if (expectedEmptyTree) {
+    if (current) {
+      throw new Error(
+        `Main checkout HEAD changed since task ${task.taskId} was created. Expected an unborn HEAD/empty-tree base, found ${current}. Re-run the task before applying a candidate.`
+      );
+    }
+    return;
+  }
+  if (current !== expected) {
+    throw new Error(
+      `Main checkout HEAD changed since task ${task.taskId} was created. Expected ${expected}, found ${current ?? "unborn HEAD"}. Re-run the task before applying a candidate.`
+    );
+  }
+}
+
 export function applyCandidate(config, workspaceRoot, taskId, requestedCandidateId, options = {}) {
   const task = loadTask(config, workspaceRoot, taskId);
+  if (task.status === "applied") {
+    throw new Error(
+      `Task ${taskId} already applied candidate ${task.selectedCandidateId ?? "(unknown)"}. Re-run the task before applying another candidate.`
+    );
+  }
   let candidateId = requestedCandidateId;
   if (options.recommended || candidateId === "--recommended") {
-    candidateId = task.recommendedCandidateId ?? extractRecommendedCandidate(task);
+    const recommendation = recommendedCandidateDecision(task);
+    candidateId = recommendation.candidateId;
     if (!candidateId) {
+      if (recommendation.ambiguousCandidateIds.length) {
+        throw new Error(
+          `Recommended candidate is ambiguous for task ${taskId}: ${recommendation.ambiguousCandidateIds.join(", ")}. Use --candidate <candidate-id>.`
+        );
+      }
       throw new Error(
         `No recommended candidate for task ${taskId}. Inspect reviewer notes with: composer-swarm result ${taskId} --verbose`
       );
@@ -2409,7 +4215,10 @@ export function applyCandidate(config, workspaceRoot, taskId, requestedCandidate
   }
   const candidate = findCandidate(task, candidateId);
   if (!candidate) {
-    throw new Error(`Candidate not found for task ${taskId}: ${requestedCandidateId}`);
+    throw new Error(`Candidate not found for task ${taskId}: ${candidateId ?? requestedCandidateId}`);
+  }
+  if (candidate.status && candidate.status !== "completed") {
+    throw new Error(`Candidate ${candidate.candidateId} is ${candidate.status}; only completed candidates can be applied.`);
   }
   if (!candidate.patchFile) {
     throw new Error(`Candidate ${candidate.candidateId} has no patch to apply.`);
@@ -2419,6 +4228,7 @@ export function applyCandidate(config, workspaceRoot, taskId, requestedCandidate
   }
 
   assertCleanMainCheckout(task.gitRoot ?? workspaceRoot);
+  assertTaskBaseStillCurrent(task, workspaceRoot);
   const check = runGit(task.gitRoot ?? workspaceRoot, ["apply", "--check", candidate.patchFile], {
     allowFailure: true,
     maxBuffer: 1024 * 1024 * 20
@@ -2447,21 +4257,55 @@ function killPid(pid, options = {}) {
     return false;
   }
   let killed = false;
+  const signal = options.signal ?? "SIGTERM";
   if (options.processGroup && process.platform !== "win32") {
     try {
-      process.kill(-pid, "SIGTERM");
+      process.kill(-pid, signal);
       killed = true;
     } catch {
       // Fall back to signalling the single PID below.
     }
   }
   try {
-    process.kill(pid, "SIGTERM");
+    process.kill(pid, signal);
     killed = true;
   } catch {
     // The process may already have exited, or the PID may be stale.
   }
   return killed;
+}
+
+function pidIsAlive(pid) {
+  if (!pid) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function recoverStaleBackgroundTask(config, workspaceRoot, task) {
+  if (task.status !== "running" || !task.backgroundPid || pidIsAlive(task.backgroundPid)) {
+    return task;
+  }
+  const message = `Background process ${task.backgroundPid} is no longer running. Marked task failed so it can be inspected or cleaned up.`;
+  task.status = "failed";
+  task.error = task.error ?? message;
+  task.completedAt = task.completedAt ?? new Date().toISOString();
+  for (const worker of task.workers ?? []) {
+    if (worker.status === "running" || worker.status === "pending") {
+      killPid(worker.pid, { processGroup: true });
+      worker.status = "failed";
+      worker.error = worker.error ?? message;
+      delete worker.pid;
+    }
+  }
+  delete task.backgroundPid;
+  saveTask(config, workspaceRoot, task);
+  return task;
 }
 
 export function cancelTask(config, workspaceRoot, taskId) {
@@ -2472,7 +4316,7 @@ export function cancelTask(config, workspaceRoot, taskId) {
   }
   delete task.backgroundPid;
   for (const worker of task.workers ?? []) {
-    if (killPid(worker.pid)) {
+    if (killPid(worker.pid, { processGroup: true })) {
       killed.push(worker.pid);
     }
     delete worker.pid;
@@ -2502,7 +4346,7 @@ function removeWorktree(gitRoot, worktree) {
 }
 
 export function cleanupTask(config, workspaceRoot, taskId) {
-  const task = loadTask(config, workspaceRoot, taskId);
+  const task = recoverStaleBackgroundTask(config, workspaceRoot, loadTask(config, workspaceRoot, taskId));
   if (task.status === "running") {
     throw new Error(`Task ${taskId} is still running. Cancel it before cleanup.`);
   }
@@ -2522,22 +4366,23 @@ export function cleanupTask(config, workspaceRoot, taskId) {
   }
   task.cleanedAt = new Date().toISOString();
   saveTask(config, workspaceRoot, task);
-	  return {
-	    task,
-	    lines: [
-	      `Cleaned ${taskId}.`,
-	      removed.length ? `Removed worktrees:\n${removed.map((entry) => `- ${entry}`).join("\n")}` : "No worktrees needed removal.",
-	      `Retained task metadata and transcripts under ${relativePath(workspaceRoot, stateRoot(config, workspaceRoot))}.`
-	    ]
-	  };
-	}
+  return {
+    task,
+    lines: [
+      `Cleaned ${taskId}.`,
+      removed.length ? `Removed worktrees:\n${removed.map((entry) => `- ${entry}`).join("\n")}` : "No worktrees needed removal.",
+      `Retained task metadata and transcripts under ${relativePath(workspaceRoot, stateRoot(config, workspaceRoot))}.`
+    ]
+  };
+}
 
 export function cleanupTasks(config, workspaceRoot, taskId = null) {
   if (taskId) {
     return cleanupTask(config, workspaceRoot, taskId).lines.join("\n");
   }
   const outputs = [];
-  for (const task of listTasks(config, workspaceRoot)) {
+  for (const listedTask of listTasks(config, workspaceRoot)) {
+    const task = recoverStaleBackgroundTask(config, workspaceRoot, listedTask);
     if (task.status === "running") {
       outputs.push(`Skipped ${task.taskId}: still running.`);
       continue;

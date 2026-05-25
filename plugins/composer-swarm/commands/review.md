@@ -1,6 +1,6 @@
 ---
 description: Run a review-only Composer Swarm pass with optional scout workers
-argument-hint: '[--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current] [--background|--wait]'
+argument-hint: '[--preset repo|security|tests] [--scouts 0..4] [--current|--include-untracked|--snapshot-current] [--background|--wait] [--json]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -17,6 +17,7 @@ Core constraints:
 - Do not fix issues, apply patches, or suggest that you are about to make changes.
 - The task is read-only; optional scout passes add broader search, and no implementation patches are created.
 - Treat review output as scout signal, not a reviewer of record. The main agent must validate important claims.
+- Use `--json` when the host agent needs a machine-readable task id, mode, worker list, and useful commands.
 - Workers run in read-only plan mode; if shell/test execution is unavailable, treat that as a verification gap.
 - Return the runtime output directly after launch or completion.
 

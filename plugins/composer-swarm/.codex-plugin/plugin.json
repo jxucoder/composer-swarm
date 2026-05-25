@@ -1,6 +1,6 @@
 {
   "name": "composer-swarm",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Add fast, low-cost Composer research and worker teams to Codex.",
   "author": {
     "name": "jxucoder"

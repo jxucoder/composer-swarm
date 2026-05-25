@@ -7,4 +7,5 @@ allowed-tools: Bash(node:*)
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/composer-swarm.mjs" verify "$ARGUMENTS"`
 
-Return the command output directly. Preserve baseline versus candidate-specific classifications.
+Return the command output directly. Preserve baseline versus candidate-specific classifications. Treat a
+non-zero process status as failed or incomplete verification, not as a command-format error.

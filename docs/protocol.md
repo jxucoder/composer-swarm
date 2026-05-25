@@ -172,6 +172,7 @@ Hosts should use the CLI for display instead of parsing task JSON directly:
 composer-swarm status <task-id>
 composer-swarm inspect <task-id>
 composer-swarm logs <task-id> --worker <label>
+composer-swarm result <task-id> --synthesis
 composer-swarm result <task-id> --verbose
 ```
 

@@ -19,6 +19,9 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
 - Composer workers must use Cursor model `composer-2.5-fast` only.
 - Composer workers edit isolated git worktrees; the Codex host supervises, compares, and chooses.
 - Research and review workers are read-only and produce evidence for Codex to verify. Treat them as scouts, not reviewers of record.
+- The runtime injects shared repo context at the top of worker prompts before task-specific and
+  worker-specific text. Treat this as application-level prompt-prefix caching support, not shared worker
+  reasoning or a model-internal KV cache.
 
 ## Default Flow
 
@@ -40,9 +43,12 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
 
    ```bash
    composer-swarm research "<question>" --workers <1-4> --background
+   composer-swarm research "<question>" --pack bugs --background
+   composer-swarm research "<question>" --angles "entry points,data flow,tests,edge cases" --background
+   composer-swarm research --from-plan <plan.md> --background
    ```
 
-   Dirty and untracked checkouts are OK for read-only research. The runtime snapshots current changes into isolated read-only worker worktrees. Use `--snapshot-current` or `--include-untracked` when the user explicitly asks to review current uncommitted work.
+   Dirty and untracked checkouts are OK for read-only research and review. Use `review --current` for prototype/current-work reviews, or `--snapshot-current`/`--include-untracked` when you need the explicit lower-level flag.
 
    Good research questions ask for evidence, not conclusions:
    - map a flow across files
@@ -50,11 +56,11 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    - compare tests, docs, and config around a subsystem
    - identify release, security, or maintenance risks
 
-   Use `--focus architecture|tests|security|docs|release` when the user asked for a narrower angle. Research output is leads; cross-check important claims yourself before answering or editing.
+   Use `--pack broad|bugs|flow|tests|design|release|security`, `--angles <a,b>`, or `--from-plan <file>` when the main model needs deliberately different research directions. Use `--from-plan` when Codex has already written a short Markdown decomposition for Composer to execute. Use `--focus architecture|tests|security|docs|release` when the user asked for a narrower topic boundary. Research output is leads; cross-check important claims yourself before answering or editing.
 
 3. Choose an implementation or review swarm shape from the user's request. Prefer detached local mode for broad or multi-step work.
 
-   Recommended defaults:
+   Sizing hints, not hard rules:
    - tiny implementation: 1 builder
    - normal implementation: 2 builders
    - broad or ambiguous implementation: 3-4 builders
@@ -64,9 +70,24 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    - repo/release/security review: 1-2 scouts
    - wide exploratory review: 3-4 scouts only when the user asks for breadth
 
+   A review with 0 scouts runs only the read-only reviewer for speed. Add scouts when the main model wants
+   broader independent coverage; scout reviews include a lightweight planning pass to coordinate angles.
+
    ```bash
    composer-swarm team "<task>" --builders <1-4> --background
    ```
+
+   If Codex has already written a concrete implementation plan, save it to a short Markdown file and use:
+
+   ```bash
+   composer-swarm team --from-plan <plan.md> --builders <1-4> --background
+   ```
+
+   This skips the Composer planning worker and sends Composer builders directly to independent implementations
+   of the main model's plan.
+
+   Add `--json` to `team`, `research`, or `review` when Codex needs a machine-readable task id, mode, worker
+   list, and useful commands instead of human launch text.
 
    For review-only work:
 
@@ -79,16 +100,20 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    For "review my current changes" or prototype repos with untracked files, use:
 
    ```bash
-   composer-swarm review --preset repo --include-untracked
+   composer-swarm review --current
    ```
 
 4. Inspect progress and output:
 
    ```bash
    composer-swarm status <task-id>
+   composer-swarm status <task-id> --json
    composer-swarm inspect <task-id>
    composer-swarm result <task-id>
    composer-swarm result <task-id> --verbose
+   composer-swarm result <task-id> --synthesis
+   composer-swarm result <task-id> --findings
+   composer-swarm result <task-id> --json
    composer-swarm logs <task-id>
    composer-swarm logs <task-id> --worker <worker-label>
    ```
@@ -101,6 +126,8 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
    ```
 
 6. Review the actual patch files listed by `result`; do not rely only on summaries or heuristic recommendations.
+   Apply will fail if the main checkout has advanced from the task's recorded base commit, so re-run `team`
+   after rebasing, pulling, or committing unrelated work.
 
 7. Ask the user which candidate to apply. After explicit approval, apply exactly that candidate:
 
@@ -118,11 +145,12 @@ Design model: follow OpenAI Swarm-style routines and handoffs. This skill is the
 ## Operating Rules
 
 - Do not apply a candidate patch without explicit user approval in the current conversation.
-- Do not use research or review output as authority. Use it as evidence-backed scout leads and verify important claims.
+- Do not use research or review output as authority. Use `result --synthesis`, `result --findings`, or `result --json` as evidence-backed scout leads and verify important claims.
 - When using research, continue Codex's own local search instead of waiting idly for Composer.
 - Read-only workers run in Cursor plan mode. If they cannot execute shell/tests, do not treat that as a task failure; record it as a verification gap and run local checks yourself when needed.
 - `--recommended` is only a shortcut after the user approves the detected recommendation.
 - Treat reviewer recommendations as heuristic. Inspect patches yourself.
-- `verify` distinguishes baseline failures from candidate-specific failures.
+- `verify` distinguishes baseline failures from candidate-specific failures and exits non-zero when any
+  checked candidate fails verification or any candidate cannot be checked.
 - If the current directory is not a git repo, use the setup/status guidance to choose the correct repository.
 - Do not edit worker worktrees manually unless debugging Composer Swarm itself.

@@ -1,6 +1,6 @@
 ---
 description: Delegate a repository task to fast Composer workers for broader search and candidate patches
-argument-hint: '<task> [--builders 2] [--background|--wait]'
+argument-hint: '<task> [--builders 2] [--from-plan <file>] [--background|--wait] [--json]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -13,6 +13,9 @@ Raw slash-command arguments:
 Core constraints:
 - Composer workers edit only isolated git worktrees.
 - Composer workers use Cursor model `composer-2.5-fast` only.
+- If the main agent has already written an implementation plan, pass it with `--from-plan <file>` so Composer
+  builders execute that plan instead of launching a Composer planning pass.
+- Use `--json` when the host agent needs a machine-readable task id, mode, worker list, and useful commands.
 - Do not apply any candidate patch from this command.
 - Return the runtime output directly after launch or completion.
 

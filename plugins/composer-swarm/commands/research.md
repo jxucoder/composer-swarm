@@ -1,6 +1,6 @@
 ---
 description: Run read-only Composer Swarm research while the main agent keeps investigating
-argument-hint: '<question> [--workers 2] [--focus architecture|tests|security|docs|release] [--include-untracked|--snapshot-current] [--background|--wait]'
+argument-hint: '<question> [--workers 2] [--focus architecture|tests|security|docs|release] [--pack broad|bugs|flow|tests|design|release|security] [--angles <a,b>] [--from-plan <file>] [--include-untracked|--snapshot-current] [--background|--wait] [--json]'
 disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -17,6 +17,8 @@ Core constraints:
 - Do not fix issues, create patches, verify candidates, or apply anything from this command.
 - Composer output is evidence and scout leads for the main agent; it is not authority or a reviewer of record.
 - The main agent should continue its own repo investigation and cross-check important Composer findings.
+- Use `--pack`, `--angles`, or `--from-plan` when the host needs deliberately different research angles instead of duplicate broad searches.
+- Use `--json` when the host agent needs a machine-readable task id, mode, worker list, and useful commands.
 - Workers run in read-only plan mode; if shell/test execution is unavailable, treat that as a verification gap.
 - Return the runtime output directly after launch or completion.
 

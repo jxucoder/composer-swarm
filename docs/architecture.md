@@ -43,9 +43,10 @@ to use, how to inspect results, and when to ask before applying.
 Generic users can call the same runtime directly:
 
 ```bash
-composer-swarm review --preset repo --include-untracked
-composer-swarm research "map auth token flow" --workers 3 --background
+composer-swarm review --current
+composer-swarm research "map auth token flow" --pack flow --background
 composer-swarm team "fix flaky login test" --builders 2 --background
+composer-swarm team --from-plan plans/login-fix.md --builders 3 --background
 ```
 
 ## Runtime
@@ -102,16 +103,22 @@ Worker labels are runtime labels, not user-configured personas or roles.
 
 ### Research
 
-`research` runs one to four read-only workers. It produces evidence for the host agent and has no candidate
+`research` runs one to four read-only workers. Research packs and host-supplied angles assign distinct search
+directions so workers broaden the host model's investigation instead of duplicating it. It produces evidence for the host agent and has no candidate
 patches, verifier checks, recommendation, or apply path.
 
 Dirty or untracked checkouts are allowed. The runtime snapshots current tracked modifications and untracked
 files into each read-only worker worktree.
 
+Each task records a bounded shared repo context summary in task state. Worker prompts put this shared context
+at the top before task-specific metadata, worker labels, and angle assignments, which keeps prompt prefixes
+cache-friendly without adding a separate cache workflow or sharing worker reasoning.
+
 ### Review
 
-`review` runs a read-only planner, optional read-only scouts, and a read-only reviewer. It is designed for
-repository review and the common "review my current changes before I commit" workflow.
+`review` runs a read-only reviewer for quick no-scout reviews. When scouts are requested, it adds a
+read-only planner to coordinate scout angles before the final reviewer pass. It is designed for repository
+review and the common "review my current changes before I commit" workflow.
 
 Dirty or untracked checkouts are allowed and snapshotted into worker worktrees. Review workers are prompted
 to return structured findings with severity, file, issue, rationale, suggested fix, confidence, evidence, and
@@ -119,9 +126,13 @@ verification gaps. The host agent must validate important findings against sourc
 
 ### Team
 
-`team` runs a planner, one to four builders, and a reviewer. The main checkout must be clean before the task
-starts, aside from Composer Swarm runtime state. Each builder edits a separate git worktree and the runtime
-collects the diff as a candidate patch.
+`team` normally runs a planner, one to four builders, and a reviewer. The main checkout must be clean before
+the task starts, aside from Composer Swarm runtime state. Each builder edits a separate git worktree and the
+runtime collects the diff as a candidate patch.
+
+When the host model already wrote the implementation plan, `team --from-plan <file>` skips the Composer
+planner and launches builders directly from that host-authored plan. This keeps planning and final synthesis
+with the main model while using Composer for independent implementation attempts.
 
 The reviewer can recommend a candidate, but the host/user must inspect and approve before `apply`.
 
@@ -139,7 +150,8 @@ Runtime state lives in the target repository:
     worktrees/<task-id>/<worker-label>/
 ```
 
-Commit `.composer-swarm/config.json` when useful. Ignore `.composer-swarm/state/`.
+Keep `.composer-swarm/config.json` local by default because it may contain trust flags or verifier commands.
+Share reviewed templates such as `swarm.config.example.json`. Ignore `.composer-swarm/state/`.
 
 ## Local Background Mode
 
@@ -150,6 +162,7 @@ Users inspect it with:
 composer-swarm status <task-id>
 composer-swarm inspect <task-id>
 composer-swarm logs <task-id> --worker <label>
+composer-swarm result <task-id> --synthesis
 composer-swarm result <task-id> --verbose
 ```
 
@@ -159,7 +172,7 @@ This is not Cursor Background Agents, a hosted Codex task, or a managed job queu
 
 `apply` is intentionally narrow:
 
-- requires a clean checkout, aside from Composer Swarm runtime state
+- requires a clean checkout still at the task's recorded base commit, aside from Composer Swarm runtime state
 - applies exactly one selected candidate patch
 - checks that the patch applies cleanly first
 - never runs for research or review tasks

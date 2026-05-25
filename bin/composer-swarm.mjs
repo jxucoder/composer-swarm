@@ -14,6 +14,7 @@ import {
   createResearchTask,
   createTeamTask,
   defaultConfig,
+  initializeGitRepository,
   resolveWorkspaceContext,
   formatPlan,
   loadConfig,
@@ -29,7 +30,7 @@ import {
   runTaskWorkflow,
   scoutWorkerLabels,
   verifyCandidate,
-  verifyCandidates,
+  verifyCandidatesResult,
   workspaceConfigFile,
   writeDefaultConfig
 } from "../src/runtime.mjs";
@@ -44,14 +45,14 @@ Usage:
   composer-swarm setup [--init] [--trust] [--force] [--json]
   composer-swarm doctor
   composer-swarm plan <task text>
-  composer-swarm team <task text> [--builders 2] [--background|--wait]
-  composer-swarm research <question> [--workers 2] [--focus <area>] [--include-untracked|--snapshot-current] [--background|--wait]
-  composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current] [--background|--wait]
+  composer-swarm team <task text> [--builders 2] [--from-plan <file>] [--background|--wait] [--json]
+  composer-swarm research <question> [--workers 2] [--focus <area>] [--pack broad|bugs|flow|tests|design|release|security] [--angles <a,b>] [--from-plan <file>] [--include-untracked|--snapshot-current] [--background|--wait] [--json]
+  composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--current|--include-untracked|--snapshot-current] [--background|--wait] [--json]
   composer-swarm ls
-  composer-swarm status [task-id]
+  composer-swarm status [task-id] [--json]
   composer-swarm inspect [task-id]
   composer-swarm logs [task-id] [--worker <label>] [--tail 80]
-  composer-swarm result [task-id] [--verbose]
+  composer-swarm result [task-id] [--verbose|--findings|--synthesis|--json]
   composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
   composer-swarm apply <task-id> --candidate <candidate-id>
   composer-swarm apply <task-id> --recommended
@@ -94,25 +95,161 @@ function readTaskText(positionals) {
   return positionals.join(" ").trim();
 }
 
+function readPlanFile(cwd, filePath) {
+  const resolved = path.resolve(cwd, filePath);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`Plan file not found: ${filePath}`);
+  }
+  return {
+    path: resolved,
+    displayPath: filePath,
+    text: fs.readFileSync(resolved, "utf8")
+  };
+}
+
+function planPathForRuntime(workspaceRoot, planPath) {
+  if (!planPath) {
+    return null;
+  }
+  const relative = path.relative(workspaceRoot, planPath);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : planPath;
+}
+
+function objectiveFromPlan(planText, planFile) {
+  let fallbackHeading = null;
+  for (const rawLine of String(planText ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const objective = /^objective:\s*(.+)$/i.exec(line);
+    if (objective?.[1]) {
+      return objective[1].trim();
+    }
+    const heading = /^#{1,3}\s+(.+)$/.exec(line);
+    if (heading?.[1] && !fallbackHeading) {
+      fallbackHeading = heading[1].trim();
+    }
+  }
+  return fallbackHeading || `Task from ${planFile}`;
+}
+
+function launchMode(task) {
+  if (task.options?.research) {
+    return "research";
+  }
+  if (task.options?.review) {
+    return "review";
+  }
+  return "team";
+}
+
+function repoContextMetadata(task) {
+  const context = task.repoContext ?? task.contextCache;
+  if (!context) {
+    return null;
+  }
+  const { text, ...metadata } = context;
+  return metadata;
+}
+
+function launchCommands(task) {
+  const commands = {
+    status: `composer-swarm status ${task.taskId}`,
+    statusJson: `composer-swarm status ${task.taskId} --json`,
+    inspect: `composer-swarm inspect ${task.taskId}`,
+    logs: `composer-swarm logs ${task.taskId}`,
+    result: `composer-swarm result ${task.taskId}`,
+    resultJson: `composer-swarm result ${task.taskId} --json`
+  };
+  const mode = launchMode(task);
+  if (mode === "review" || mode === "research") {
+    commands.synthesis = `composer-swarm result ${task.taskId} --synthesis`;
+    commands.findings = `composer-swarm result ${task.taskId} --findings`;
+  }
+  if (mode === "team") {
+    commands.verify = `composer-swarm verify ${task.taskId}`;
+  }
+  commands.cleanup = `composer-swarm cleanup ${task.taskId}`;
+  return commands;
+}
+
+function launchPayload(workspaceRoot, task) {
+  const mode = launchMode(task);
+  return {
+    schema: "composer-swarm.launch.v1",
+    taskId: task.taskId,
+    status: task.status,
+    mode,
+    objective: task.objective,
+    workspaceRoot,
+    background: Boolean(task.options?.background),
+    backgroundPid: task.backgroundPid ?? null,
+    baseSha: task.baseSha ?? null,
+    baseBranch: task.baseBranch ?? null,
+    workers: (task.workers ?? []).map((worker) => ({
+      label: worker.label,
+      status: worker.status,
+      canEdit: Boolean(worker.canEdit)
+    })),
+    repoContext: repoContextMetadata(task),
+    research: mode === "research"
+      ? {
+          workers: task.options?.workers ?? null,
+          focus: task.options?.focus ?? null,
+          pack: task.options?.researchPack ?? null,
+          planFile: task.options?.researchPlanFile ?? null,
+          angles: task.options?.researchAngles ?? []
+        }
+      : null,
+    review: mode === "review"
+      ? {
+          scouts: task.options?.scouts ?? 0,
+          snapshotCurrent: Boolean(task.options?.snapshotCurrent)
+        }
+      : null,
+    team: mode === "team"
+      ? {
+          builders: task.options?.builders ?? 0,
+          implementationPlanFile: task.options?.implementationPlanFile ?? null,
+          hostProvidedPlan: Boolean(task.options?.implementationPlan)
+        }
+      : null,
+    commands: launchCommands(task)
+  };
+}
+
+function writeLaunchJson(workspaceRoot, task) {
+  process.stdout.write(`${JSON.stringify(launchPayload(workspaceRoot, task), null, 2)}\n`);
+}
+
 function cliPath() {
   return fileURLToPath(import.meta.url);
 }
 
 function workspaceContext(cwd, options = {}) {
   const ctx = resolveWorkspaceContext(cwd, options);
-  return { workspaceRoot: ctx.workspaceRoot, config: ctx.config, gitRoot: ctx.gitRoot };
+  return { workspaceRoot: ctx.workspaceRoot, config: ctx.config, gitRoot: ctx.gitRoot, nearbyGitRepos: ctx.nearbyGitRepos };
 }
 
 function setupReport(cwd, options = {}) {
-  const ctx = resolveWorkspaceContext(cwd, { requireGit: false });
-  const targetRoot = ctx.gitRoot ?? ctx.workspaceRoot;
+  let ctx = resolveWorkspaceContext(cwd, { requireGit: false });
+  let targetRoot = ctx.gitRoot ?? ctx.workspaceRoot;
   let initialized = null;
+  let initializedGit = null;
+
+  if (options.init && !ctx.gitRoot && !(ctx.nearbyGitRepos ?? []).length) {
+    initializedGit = initializeGitRepository(targetRoot);
+    ctx = resolveWorkspaceContext(initializedGit, { requireGit: false });
+    targetRoot = ctx.gitRoot ?? initializedGit;
+  }
 
   if (options.init) {
     initialized = writeDefaultConfig(targetRoot, {
       force: Boolean(options.force),
       trust: Boolean(options.trust)
     });
+    ctx = resolveWorkspaceContext(targetRoot, { requireGit: false });
   }
 
   const config = loadConfig(targetRoot);
@@ -123,7 +260,7 @@ function setupReport(cwd, options = {}) {
   const nextSteps = [];
 
   if (!ctx.gitRoot) {
-    nextSteps.push("Run composer-swarm from a git repository root.");
+    nextSteps.push("Initialize this directory: composer-swarm setup --init --trust");
     for (const repo of ctx.nearbyGitRepos ?? []) {
       nextSteps.push(`Try: cd ${repo}`);
     }
@@ -147,6 +284,7 @@ function setupReport(cwd, options = {}) {
     configFile,
     configExists,
     initialized,
+    initializedGit,
     doctor,
     nextSteps
   };
@@ -169,6 +307,9 @@ function renderSetupReport(report) {
 
   if (report.initialized) {
     lines.push(`Initialized config: ${report.initialized}`, "");
+  }
+  if (report.initializedGit) {
+    lines.push(`Initialized git repository: ${report.initializedGit}`, "");
   }
 
   lines.push("Checks:");
@@ -209,6 +350,8 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
     builders,
     scouts,
     model: options.model ?? null,
+    implementationPlan: options.implementationPlan ?? null,
+    implementationPlanFile: options.implementationPlanFile ?? null,
     background: Boolean(options.background),
     review: isReview,
     snapshotCurrent: Boolean(options["snapshot-current"] || options["include-untracked"]),
@@ -216,14 +359,25 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
   });
   if (options.background) {
     const pid = spawnBackgroundTask(workspaceRoot, task.taskId);
+    task.backgroundPid = pid;
     recordBackgroundPid(config, workspaceRoot, task.taskId, pid);
+    if (options.json) {
+      writeLaunchJson(workspaceRoot, task);
+      return task;
+    }
     console.log(`Started ${task.taskId} as a detached local run.`);
     console.log(`Status: composer-swarm status ${task.taskId}`);
     console.log(`Result: composer-swarm result ${task.taskId}`);
     return task;
   }
-  console.log(`Started ${task.taskId}.`);
+  if (!options.json) {
+    console.log(`Started ${task.taskId}.`);
+  }
   const finished = await runTaskWorkflow(config, workspaceRoot, task.taskId);
+  if (options.json) {
+    writeLaunchJson(workspaceRoot, finished);
+    return finished;
+  }
   console.log(renderStatus(config, workspaceRoot, finished.taskId));
   console.log("");
   console.log(`Result: composer-swarm result ${finished.taskId}`);
@@ -231,8 +385,8 @@ async function runTeamCommand(config, workspaceRoot, taskText, options) {
 }
 
 async function runResearchCommand(config, workspaceRoot, question, options) {
-  const workers = options.workers ? Number(options.workers) : 2;
-  if (!Number.isInteger(workers) || workers < 1 || workers > researchWorkerLabels(99).length) {
+  const workers = options.workers ? Number(options.workers) : null;
+  if (workers !== null && (!Number.isInteger(workers) || workers < 1 || workers > researchWorkerLabels(99).length)) {
     console.error("Invalid --workers value. Use an integer from 1 to 4.");
     process.exitCode = 2;
     return null;
@@ -243,8 +397,12 @@ async function runResearchCommand(config, workspaceRoot, question, options) {
     return null;
   }
   const task = createResearchTask(config, workspaceRoot, question, {
-    workers,
+    workers: workers ?? undefined,
     focus: options.focus ?? null,
+    pack: options.pack ?? null,
+    angles: options.angles ?? null,
+    researchPlan: options.researchPlan ?? null,
+    researchPlanFile: options.researchPlanFile ?? null,
     model: options.model ?? null,
     background: Boolean(options.background),
     snapshotCurrent: Boolean(options["snapshot-current"] || options["include-untracked"]),
@@ -252,14 +410,25 @@ async function runResearchCommand(config, workspaceRoot, question, options) {
   });
   if (options.background) {
     const pid = spawnBackgroundTask(workspaceRoot, task.taskId);
+    task.backgroundPid = pid;
     recordBackgroundPid(config, workspaceRoot, task.taskId, pid);
+    if (options.json) {
+      writeLaunchJson(workspaceRoot, task);
+      return task;
+    }
     console.log(`Started ${task.taskId} as a detached local run.`);
     console.log(`Status: composer-swarm status ${task.taskId}`);
     console.log(`Result: composer-swarm result ${task.taskId} --verbose`);
     return task;
   }
-  console.log(`Started ${task.taskId}.`);
+  if (!options.json) {
+    console.log(`Started ${task.taskId}.`);
+  }
   const finished = await runTaskWorkflow(config, workspaceRoot, task.taskId);
+  if (options.json) {
+    writeLaunchJson(workspaceRoot, finished);
+    return finished;
+  }
   console.log(renderStatus(config, workspaceRoot, finished.taskId));
   console.log("");
   console.log(`Result: composer-swarm result ${finished.taskId} --verbose`);
@@ -344,28 +513,38 @@ async function main() {
   }
 
   if (command === "team") {
-    const { options, positionals } = parseArgs(args, ["builders", "model"]);
-    const taskText = readTaskText(positionals);
+    const { options, positionals } = parseArgs(args, ["builders", "model", "from-plan"]);
+    const plan = options["from-plan"] ? readPlanFile(cwd, options["from-plan"]) : null;
+    const taskText = readTaskText(positionals) || (plan ? objectiveFromPlan(plan.text, plan.displayPath) : "");
     if (!taskText) {
       console.error("Missing task text.");
       process.exitCode = 2;
       return;
     }
     const { workspaceRoot, config } = workspaceContext(cwd);
-    await runTeamCommand(config, workspaceRoot, taskText, options);
+    await runTeamCommand(config, workspaceRoot, taskText, {
+      ...options,
+      implementationPlan: plan?.text ?? null,
+      implementationPlanFile: plan ? planPathForRuntime(workspaceRoot, plan.path) : null
+    });
     return;
   }
 
   if (command === "research") {
-    const { options, positionals } = parseArgs(args, ["workers", "focus", "model"]);
-    const question = readTaskText(positionals);
+    const { options, positionals } = parseArgs(args, ["workers", "focus", "pack", "angles", "from-plan", "model"]);
+    const plan = options["from-plan"] ? readPlanFile(cwd, options["from-plan"]) : null;
+    const question = readTaskText(positionals) || (plan ? objectiveFromPlan(plan.text, plan.displayPath) : "");
     if (!question) {
       console.error("Missing research question.");
       process.exitCode = 2;
       return;
     }
     const { workspaceRoot, config } = workspaceContext(cwd);
-    await runResearchCommand(config, workspaceRoot, question, options);
+    await runResearchCommand(config, workspaceRoot, question, {
+      ...options,
+      researchPlan: plan?.text ?? null,
+      researchPlanFile: plan ? planPathForRuntime(workspaceRoot, plan.path) : null
+    });
     return;
   }
 
@@ -373,12 +552,23 @@ async function main() {
     const { options, positionals } = parseArgs(args, ["preset", "model", "scouts"]);
     const preset = options.preset ?? positionals[0] ?? "repo";
     const taskText = reviewObjective(preset);
-    const { workspaceRoot, config } = workspaceContext(cwd);
-    await runTeamCommand(config, workspaceRoot, taskText, {
+    let ctx = workspaceContext(cwd, { requireGit: !options.current });
+    if (options.current && !ctx.gitRoot && !(ctx.nearbyGitRepos ?? []).length) {
+      const gitRoot = initializeGitRepository(ctx.workspaceRoot);
+      ctx = workspaceContext(gitRoot);
+    }
+    if (!ctx.gitRoot) {
+      throw new Error(
+        `Current directory is not inside a git repository: ${cwd}\nRun composer-swarm setup --init --trust, or cd into a nearby repository.`
+      );
+    }
+    await runTeamCommand(ctx.config, ctx.workspaceRoot, taskText, {
       ...options,
       review: true,
       builders: 0,
-      scouts: options.scouts ?? 0
+      scouts: options.scouts ?? 0,
+      "include-untracked": Boolean(options.current || options["include-untracked"]),
+      "snapshot-current": Boolean(options.current || options["snapshot-current"])
     });
     return;
   }
@@ -389,13 +579,20 @@ async function main() {
       throw new Error("Missing task id for internal runner.");
     }
     const { workspaceRoot, config } = workspaceContext(cwd);
-    await runTaskWorkflow(config, workspaceRoot, taskId);
+    const task = await runTaskWorkflow(config, workspaceRoot, taskId);
+    if (task.status === "failed") {
+      process.exitCode = 1;
+    }
     return;
   }
 
   if (command === "status" || command === "ls") {
+    const { options, positionals } = parseArgs(args, []);
     const { workspaceRoot, config } = workspaceContext(cwd, { requireGit: false });
-    console.log(renderStatus(config, workspaceRoot, command === "ls" ? null : args[0] ?? null));
+    const output = renderStatus(config, workspaceRoot, command === "ls" ? null : positionals[0] ?? null, {
+      json: Boolean(options.json)
+    });
+    process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
     return;
   }
 
@@ -420,7 +617,13 @@ async function main() {
   if (command === "result") {
     const { options, positionals } = parseArgs(args, []);
     const { workspaceRoot, config } = workspaceContext(cwd, { requireGit: false });
-    console.log(renderResult(config, workspaceRoot, positionals[0] ?? null, { verbose: Boolean(options.verbose) }));
+    const output = renderResult(config, workspaceRoot, positionals[0] ?? null, {
+      verbose: Boolean(options.verbose),
+      findings: Boolean(options.findings),
+      synthesis: Boolean(options.synthesis),
+      json: Boolean(options.json)
+    });
+    process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
     return;
   }
 
@@ -437,8 +640,15 @@ async function main() {
     if (options.candidate) {
       const result = verifyCandidate(config, workspaceRoot, taskId, options.candidate, verifyOptions);
       console.log(result.lines.join("\n"));
+      if (result.check?.status === "failed") {
+        process.exitCode = 1;
+      }
     } else {
-      console.log(verifyCandidates(config, workspaceRoot, taskId, verifyOptions));
+      const result = verifyCandidatesResult(config, workspaceRoot, taskId, verifyOptions);
+      console.log(result.output);
+      if (result.failed) {
+        process.exitCode = 1;
+      }
     }
     return;
   }

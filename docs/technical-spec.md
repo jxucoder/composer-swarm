@@ -17,8 +17,8 @@ Swarm copies the primitives rather than the dependency:
 - **Handoff:** Starting a Composer worker is a handoff from the host agent to an isolated worker process. The
   handoff is explicit, bounded by a worker label, worktree, prompt, timeout, and transcript.
 - **Context variables:** `.composer-swarm/state/` is the durable context store. The runtime records task
-  status, worker output, candidate patches, verifier checks, and selected candidates instead of relying on
-  hidden model memory.
+  status, worker output, candidate patches, verifier checks, selected candidates, and shared repo context
+  summary metadata instead of relying on hidden model memory.
 - **Return to host:** Composer workers do not apply patches or own final judgment. Results return to the host
   agent, which cross-checks evidence, asks for approval, and runs final checks.
 
@@ -43,7 +43,8 @@ Runtime state:
     worktrees/<task-id>/<worker-label>/
 ```
 
-Commit `.composer-swarm/config.json` when the worker commands are useful. Ignore `.composer-swarm/state/`.
+Keep `.composer-swarm/config.json` local by default because it may contain trust flags or project-specific
+verifier commands. Share reviewed templates such as `swarm.config.example.json`. Ignore `.composer-swarm/state/`.
 
 ## Config Schema
 
@@ -98,13 +99,15 @@ alternate implementation attempts while the host agent owns final judgment.
 
 Research work uses one to four read-only Composer workers. It does not create candidates, verifier checks,
 recommendations, or apply commands. Research is designed to run while the host agent continues its own repo
-investigation and later reconciles the Composer evidence. If one research worker fails or times out, completed
-worker outputs are still recorded so the host agent can use the partial evidence.
+investigation and later reconciles the Composer evidence. If one research worker fails or times out while
+another succeeds, the task status is `partial`; completed worker outputs are still recorded so the host agent
+can use the partial evidence. If all research workers fail, the task status is `failed`.
 
 Default implementation work uses one planning pass, one to four isolated implementation attempts, and one
-review pass. Review-only work uses one planning pass, optional read-only scout passes, and one review pass.
-Treat review-only output as scout signal for the host agent to validate, not as a reviewer of record. These
-worker labels are runtime state, not user-configured personas.
+review pass. Review-only work uses a single reviewer for quick no-scout reviews. When scouts are requested,
+it adds one planning pass to coordinate scout angles before the reviewer pass. Treat review-only output as
+scout signal for the host agent to validate, not as a reviewer of record. These worker labels are runtime
+state, not user-configured personas.
 
 Planning, research, scout, and review passes run in Cursor plan mode. They may not be able to execute shell
 checks, so behavioral claims must be verified by the host or by configured verifier commands where applicable.
@@ -120,14 +123,14 @@ composer-swarm init [--force] [--trust]
 composer-swarm setup [--init] [--trust] [--force] [--json]
 composer-swarm doctor
 composer-swarm plan <task text>
-composer-swarm team <task text> [--builders 2] [--background|--wait]
-composer-swarm research <question> [--workers 2] [--focus <area>] [--include-untracked|--snapshot-current] [--background|--wait]
-composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--include-untracked|--snapshot-current] [--background|--wait]
+composer-swarm team <task text> [--builders 2] [--from-plan <file>] [--background|--wait] [--json]
+composer-swarm research <question> [--workers 2] [--focus <area>] [--pack broad|bugs|flow|tests|design|release|security] [--angles <a,b>] [--from-plan <file>] [--include-untracked|--snapshot-current] [--background|--wait] [--json]
+composer-swarm review [--preset repo|security|tests] [--scouts 0..4] [--current|--include-untracked|--snapshot-current] [--background|--wait] [--json]
 composer-swarm ls
-composer-swarm status [task-id]
+composer-swarm status [task-id] [--json]
 composer-swarm inspect [task-id]
 composer-swarm logs [task-id] [--worker <label>] [--tail 80]
-composer-swarm result [task-id] [--verbose]
+composer-swarm result [task-id] [--verbose|--findings|--synthesis|--json]
 composer-swarm verify <task-id> [--candidate <id>] [--no-baseline]
 composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm apply <task-id> --recommended
@@ -139,9 +142,14 @@ composer-swarm cleanup [task-id]
 `result` can inspect it later. This is local process detachment, not a hosted Cursor Background Agent,
 hosted Codex task, or managed task UI.
 
+Launch commands accept `--json` and emit a `composer-swarm.launch.v1` envelope with `taskId`, `mode`,
+`status`, worker labels, repo context metadata, and useful text and JSON inspection/verification commands.
+This is intended for host agents that need to launch Composer work and keep orchestrating without scraping
+human stdout.
+
 `setup` checks git, config, Node, the configured Composer worker command, and the configured shell verifier
-command when one is present. `setup --init --trust` writes `.composer-swarm/config.json` with trusted Composer
-worker args and no verifier guess.
+command when one is present. `setup --init --trust` initializes git when the current directory has no repo,
+writes `.composer-swarm/config.json` with trusted Composer worker args, and makes no verifier guess.
 
 Dirty-check behavior is mode-specific:
 
@@ -160,16 +168,47 @@ Research tasks are read-only and return evidence for the host agent:
 ```bash
 composer-swarm research "Find every place config is loaded or normalized" --workers 3 --background
 composer-swarm research "Map the release flow and risky manual steps" --workers 4 --focus release
+composer-swarm research "Look for release-blocking defects" --pack bugs
+composer-swarm research "Map auth behavior" --angles "entry points,data flow,tests,edge cases"
+composer-swarm research --from-plan plans/auth-research.md
 composer-swarm research "Review the current rewrite" --snapshot-current
 ```
 
 Use `--workers 1..4` to choose breadth. Use `--focus` for a coarse area such as `architecture`, `tests`,
-`security`, `docs`, or `release`. The host agent should continue its own search while research runs, then
-read `result --verbose` and cross-check important claims against the cited files or commands.
+`security`, `docs`, or `release`. Use `--pack` for built-in multi-angle research packs, `--angles` for a
+host-model-supplied comma-separated angle list, or `--from-plan` for a host-authored Markdown plan whose
+bullets become worker angles. The host agent should continue its own search while research runs, then read
+`result --synthesis`, `result --verbose`, or `result --json` and cross-check important claims against the
+cited files or commands.
+
+Every task also records a prompt-level repo context summary in task state. The summary contains bounded
+file/package metadata, not worker reasoning. Worker prompts place this shared context at the top of the
+prompt before task-specific metadata, worker labels, and angles so provider prompt-prefix caching can help
+when available, while each Composer worker still interprets the evidence independently.
 
 Read-only research can run against dirty and untracked checkouts. When the checkout has non-runtime changes,
 the runtime automatically snapshots tracked modifications and untracked files into each read-only worker
 worktree. `--snapshot-current` or `--include-untracked` makes that intent explicit.
+
+## Implementation Teams
+
+Implementation teams create isolated candidate patches:
+
+```bash
+composer-swarm team "Implement the requested checkout fix" --builders 2
+composer-swarm team --from-plan plans/checkout-implementation.md --builders 3
+```
+
+By default, `team` runs a read-only Composer planner before launching builders. When the main reasoning model
+has already investigated and written a plan, `team --from-plan <file>` stores that host-authored plan on the
+task, injects it into worker prompts, skips the Composer planner worker, and launches the builder workers
+directly. The exact plan file is treated as a task input and ignored by the clean-checkout gate if it is
+untracked or modified in the main checkout. This is the planner/executor split: the host owns the plan and
+final synthesis; Composer workers produce independent implementation candidates.
+
+Implementation tasks use `partial` when at least one completed candidate exists but another worker failed.
+They use `failed` only when no completed candidate is available. This lets host agents inspect and verify
+usable candidate patches instead of treating one failed worker as a total swarm failure.
 
 ## ComposerDelegate Interface
 
@@ -190,7 +229,7 @@ files. The mapping is:
 | Conceptual call | v1 command |
 |---|---|
 | `mode: "research"` | `composer-swarm research "<question>" --workers <1-4>` |
-| `mode: "implement"` | `composer-swarm team "<task>" --builders <1-4>` |
+| `mode: "implement"` | `composer-swarm team "<task>" --builders <1-4>` or `composer-swarm team --from-plan <file> --builders <1-4>` |
 | `mode: "review"` | `composer-swarm review --preset repo --scouts <0-4>` |
 | inspect task state | `composer-swarm inspect <task-id>` |
 | inspect worker output | `composer-swarm logs <task-id> --worker <label>` |
@@ -208,24 +247,37 @@ Review presets avoid long prompts:
 composer-swarm review
 composer-swarm review --preset security
 composer-swarm review --preset tests
+composer-swarm review --current
 composer-swarm review --preset repo --include-untracked
 ```
 
-Review tasks run a read-only review workflow with optional scout passes. They do not create implementation
-patches. Dirty and untracked checkouts are supported by snapshotting current files into read-only worker
-worktrees. This supports the common "review my current changes before I commit" workflow without weakening
-the clean-checkout requirement for implementation and apply. Workers are prompted to return severity,
-file:line, issue, rationale, suggested fix, confidence, evidence, and verification gaps.
+Review tasks run a read-only review workflow. No-scout reviews launch only the reviewer; scout reviews add a
+planner plus the requested scout passes. They do not create implementation patches. Dirty and untracked
+checkouts are supported by snapshotting current files into read-only worker worktrees. This supports the
+common "review my current changes before I commit" workflow without weakening the clean-checkout requirement
+for implementation and apply. Workers are prompted to return severity, file:line, issue, rationale, suggested
+fix, confidence, evidence, and verification gaps.
 
 ## Results
 
 For implementation tasks, `result` shows candidate IDs, changed-file counts, patch size, verifier status,
 reviewer notes, and the detected recommendation when one can be parsed. Use `--verbose` for patch paths,
-worktree paths, and failed check output.
+worktree paths, and failed check output. `result --json` includes `candidateSummary` with candidate status
+counts, patch availability, verifier check buckets, the parsed recommendation, and ambiguous recommendation
+matches when present, plus the team reviewer status, transcript path, error, and notes excerpt. Use the
+reviewer signal as supporting evidence; the host model still owns final selection and approval.
 
 For review and research tasks, `result` prints the workers' final reports and guidance to verify important
-claims locally. `--verbose` adds scout/research transcript paths and worker notes. It never prints apply
-commands for read-only tasks.
+claims locally. `--verbose` adds scout/research transcript paths and worker notes. `--synthesis` prints a
+host-facing coverage and verification brief that keeps Composer findings framed as scout leads. `--findings`
+prints only parsed review or research findings with confidence, verification, and verification tier, and
+`--json` emits machine-readable result data with severity/file fields for reviews and source worker, angle,
+claim, evidence, confidence, verification, `verified_by_worker`, `verification_tier` (`executed`, `source`,
+`declared`, or `unverified`), and follow-up fields for research where parsed. For review and research tasks,
+JSON also includes `synthesis.workerCoverage`, `synthesis.verificationSummary`, and
+`synthesis.hostFollowUpChecks` so host agents can consume coverage and verification state without parsing
+the text synthesis. Result extraction scans worker final text and structured tool payloads. It never prints
+apply commands for read-only tasks.
 
 ## Inspect And Logs
 
@@ -264,7 +316,9 @@ composer-swarm verify <task-id> --candidate builder-a
 ```
 
 By default, verification also runs against the unmodified base commit. Failures already present on the base
-are tagged `baseline`; new failures are tagged `candidate-specific`.
+are tagged `baseline`; new failures are tagged `candidate-specific`. The `verify` command exits non-zero when
+any checked candidate reports a failed result, any completed candidate cannot be checked, or any non-completed
+candidate is skipped, so host automation can rely on the process status instead of parsing stdout.
 
 ## Apply
 
@@ -276,8 +330,8 @@ composer-swarm apply <task-id> --candidate <candidate-id>
 composer-swarm apply <task-id> --recommended
 ```
 
-Apply requires a clean checkout, aside from Composer Swarm runtime state, and checks whether the patch applies
-cleanly before changing files.
+Apply requires a clean checkout still at the task's recorded base commit, aside from Composer Swarm runtime
+state, and checks whether the patch applies cleanly before changing files.
 
 ## Repo Targeting
 
