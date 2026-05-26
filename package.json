@@ -20,7 +20,7 @@
     "delegation"
   ],
   "files": [
-    ".agents/",
+    ".agents/plugins/",
     ".claude-plugin/",
     "plugins/",
     "docs/",
@@ -28,7 +28,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "sync": "node scripts/sync-bundle.mjs",
     "test": "node --test tests/*.test.mjs"
   }
 }

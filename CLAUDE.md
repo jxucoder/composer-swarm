@@ -23,13 +23,12 @@ workflow.
 
 ```bash
 npm test         # Structural tests for scouts, manifests, docs
-npm run sync     # Copy .agents/*.md into plugins/composer-swarm/agents/
 ```
 
 ## Key conventions
 
-- Edits to scouts (`.agents/composer-*.md`) must be mirrored into
-  `plugins/composer-swarm/agents/`. Use `npm run sync`.
+- Scout sources live at `plugins/composer-swarm/agents/composer-*.md`.
+  Edit them directly; there is no separate root copy and no sync step.
 - Read-only scouts (`composer-wide-search`, `composer-deep-search`) use
   `run-agent: cursor-agent`, `permission: read-only`, `permissionMode: plan`,
   `tools: Read, Glob, Grep`.

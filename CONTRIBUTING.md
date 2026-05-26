@@ -1,22 +1,16 @@
 # Contributing
 
-Composer Swarm is a Markdown-only prompt plugin. The scouts in
-`.agents/` are duplicated inside `plugins/composer-swarm/agents/` so
-the plugin bundle is self-contained. The tests in
-`tests/prompt-pack.test.mjs` assert that the root files and the
-bundled copies are byte-identical.
+Composer Swarm is a Markdown-only prompt plugin. Scout sources live
+at `plugins/composer-swarm/agents/composer-*.md`. Both Claude Code
+and Codex marketplaces install from `plugins/composer-swarm/`, so the
+bundle directory is the canonical location — no duplicate copies, no
+sync step.
 
 ## Editing scouts
 
-The root copies under `.agents/` are the source of truth.
-
-1. Edit a source file under `.agents/composer-*.md`.
-2. Run `npm run sync` to copy changes into `plugins/composer-swarm/agents/`.
-3. Run `npm test` to verify structure, frontmatter, and bundle parity.
-
-If you forget step 2, the bundle-parity tests fail with a clear
-message. `npm run sync` also removes files from the bundle that no
-longer exist in the root, so deletions stay in lock-step.
+1. Edit a scout file under `plugins/composer-swarm/agents/composer-*.md`.
+2. Run `npm test` to verify structure, frontmatter, manifest parity,
+   and docs consistency.
 
 ## Adding a new scout
 

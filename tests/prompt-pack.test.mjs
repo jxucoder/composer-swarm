@@ -85,9 +85,11 @@ const AGENT_SPECS = {
   }
 };
 
+const SCOUT_PATH = (name) => `plugins/composer-swarm/agents/${name}.md`;
+
 test("scouts have correct frontmatter and role-specific output schema", () => {
   for (const [name, spec] of Object.entries(AGENT_SPECS)) {
-    const body = read(`.agents/${name}.md`);
+    const body = read(SCOUT_PATH(name));
     const meta = frontmatter(body);
     assert.equal(meta["run-agent"], "cursor-agent", `${name} should use Cursor CLI`);
     assert.equal(meta.permission, spec.permission, `${name} permission`);
@@ -102,7 +104,7 @@ test("scouts have correct frontmatter and role-specific output schema", () => {
 
 test("every scout has budget regimes and an adjacent-surprises footer", () => {
   for (const name of AGENT_NAMES) {
-    const body = read(`.agents/${name}.md`);
+    const body = read(SCOUT_PATH(name));
     assert.match(body, /## Budget regimes/, `${name} needs Budget regimes section`);
     assert.match(body, /\*\*quick\*\*/i, `${name} needs quick budget`);
     assert.match(body, /\*\*thorough\*\*/i, `${name} needs thorough budget`);
@@ -116,13 +118,13 @@ test("every scout has budget regimes and an adjacent-surprises footer", () => {
 
 test("read-only scouts enforce no-shell discipline; runner is the exception", () => {
   for (const name of ["composer-wide-search", "composer-deep-search"]) {
-    const body = read(`.agents/${name}.md`);
+    const body = read(SCOUT_PATH(name));
     assert.match(body, /Read-only/, `${name} should declare Read-only`);
     assert.match(body, /Do not edit/i);
     assert.match(body, /commit, push/i);
     assert.match(body, /run shell commands/i);
   }
-  const runner = read(`.agents/composer-runner.md`);
+  const runner = read(SCOUT_PATH("composer-runner"));
   assert.match(runner, /shell access/i, "runner should declare shell access");
   assert.match(runner, /one command, exactly as the main agent named it/i);
   assert.match(runner, /looks dangerous/i);
@@ -139,12 +141,21 @@ test("repo stays focused on the prompt pack", () => {
     "skills/composer-swarm",
     ".composer-swarm/config.json",
     ".composer-swarm/receipt-001.md",
-    ".agents/composer-affirm.md",
-    ".agents/composer-refute.md",
+    // v0.5 reviewer-era agents
     ".agents/composer-reasoning-reviewer.md",
     ".agents/composer-plan-reviewer.md",
     ".agents/composer-implementation-reviewer.md",
     ".agents/composer-reviewer.md",
+    // v0.6 adversarial-era agents
+    ".agents/composer-affirm.md",
+    ".agents/composer-refute.md",
+    // v0.7 root scout duplicates (collapsed to bundle-only in this commit)
+    ".agents/composer-wide-search.md",
+    ".agents/composer-deep-search.md",
+    ".agents/composer-runner.md",
+    // sync infra (no longer needed without dual scout copies)
+    "scripts",
+    "scripts/sync-bundle.mjs",
     "playbooks",
     "plugins/composer-swarm/playbooks",
     "plugins/composer-swarm/opencode",
@@ -171,16 +182,6 @@ test("plugin manifests pin the same version", () => {
 
   const claudePlugin = JSON.parse(read("plugins/composer-swarm/.claude-plugin/plugin.json"));
   assert.equal(claudePlugin.version, EXPECTED_VERSION);
-});
-
-test("plugin-bundled scouts stay synced with root scouts", () => {
-  for (const agentName of AGENT_NAMES) {
-    assert.equal(
-      read(`plugins/composer-swarm/agents/${agentName}.md`),
-      read(`.agents/${agentName}.md`),
-      `${agentName} should stay synced between root .agents and plugin bundle`
-    );
-  }
 });
 
 test("plugin bundle contains no extra files of any kind (one-way migration enforcement)", () => {
@@ -300,7 +301,7 @@ test("package ships prompt-pack plugin artifacts", () => {
   assert.equal(packageJson.license, "MIT");
   assert.equal("private" in packageJson, false);
   assert.deepEqual(packageJson.files, [
-    ".agents/",
+    ".agents/plugins/",
     ".claude-plugin/",
     "plugins/",
     "docs/",

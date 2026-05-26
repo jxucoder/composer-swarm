@@ -94,15 +94,6 @@ what it always does (synthesize, spot-check the `path:line` references
 that matter, decide). There is no mandatory artifact, no inter-scout
 adjudication, no required cross-reference between scout outputs.
 
-## Source-of-truth and sync
-
-Scout prompts live in `.agents/composer-*.md`. The plugin bundle at
-`plugins/composer-swarm/agents/` is a byte-mirror produced by
-`npm run sync`, and the test suite asserts that mirror is current.
-There is no runtime layer that resolves scout files at dispatch time;
-hosts read them from the bundle directly. See `CONTRIBUTING.md` for
-the edit workflow.
-
 ## What this avoids
 
 - **No playbooks.** Common usage patterns appear as README examples,
