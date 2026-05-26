@@ -157,7 +157,7 @@ Install **Composer Swarm** → restart.
 
 - [`docs/design.md`](docs/design.md) — scout disciplines, budget regimes, why the surprises footer
 - [`plugins/composer-swarm/skills/composer-swarm/SKILL.md`](plugins/composer-swarm/skills/composer-swarm/SKILL.md) — main-agent dispatch protocol (shipped to npm consumers)
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — edit/sync workflow
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — edit workflow and release checklist
 
 ## License
 
