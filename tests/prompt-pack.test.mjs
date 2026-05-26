@@ -29,83 +29,105 @@ function frontmatter(markdown) {
 const AGENT_NAMES = [
   "composer-wide-search",
   "composer-deep-search",
-  "composer-reasoning-reviewer",
-  "composer-plan-reviewer",
-  "composer-implementation-reviewer",
-  "composer-reviewer"
+  "composer-runner"
 ];
+const EXPECTED_VERSION = "0.7.0";
 
-const PLAYBOOK_NAMES = [
-  "investigate-bug",
-  "review-plan",
-  "review-implementation",
-  "explore-subsystem",
-  "pre-commit-risk-check"
-];
+const AGENT_SPECS = {
+  "composer-wide-search": {
+    title: "# Composer Wide Search",
+    permission: "read-only",
+    permissionMode: "plan",
+    tools: "Read, Glob, Grep",
+    expected: [
+      /wide-search scout/i,
+      /\*\*coverage\*\*/i,
+      /Map:/,
+      /Role:/,
+      /Cross-references:/,
+      /Adjacent surprises:/,
+      /Gaps:/
+    ]
+  },
+  "composer-deep-search": {
+    title: "# Composer Deep Search",
+    permission: "read-only",
+    permissionMode: "plan",
+    tools: "Read, Glob, Grep",
+    expected: [
+      /deep-search scout/i,
+      /\*\*depth\*\*/i,
+      /Trace:/,
+      /State touched:/,
+      /Error paths:/,
+      /Tests covering this trace:/,
+      /Adjacent surprises:/,
+      /Gaps:/
+    ]
+  },
+  "composer-runner": {
+    title: "# Composer Runner",
+    permission: "execute",
+    permissionMode: "default",
+    tools: "Read, Glob, Grep, Bash",
+    expected: [
+      /runner scout/i,
+      /one command/i,
+      /Command:/,
+      /Exit:/,
+      /Summary:/,
+      /Key signals:/,
+      /Side effects:/,
+      /Adjacent surprises:/,
+      /refused/,
+      /Gaps:/
+    ]
+  }
+};
 
-test("operation agents are read-only Cursor agents with distinct jobs", () => {
-  const agents = {
-    "composer-wide-search": {
-      file: ".agents/composer-wide-search.md",
-      expected: [/wide-search role/i, /Coverage:/, /Cross-links:/, /Suggested deep searches:/]
-    },
-    "composer-deep-search": {
-      file: ".agents/composer-deep-search.md",
-      expected: [/deep-search role/i, /Trace:/, /Failure modes:/, /Host follow-up:/]
-    },
-    "composer-reasoning-reviewer": {
-      file: ".agents/composer-reasoning-reviewer.md",
-      expected: [/reasoning-review role/i, /Weak assumptions:/, /Alternative interpretations:/, /Evidence needed:/]
-    },
-    "composer-plan-reviewer": {
-      file: ".agents/composer-plan-reviewer.md",
-      expected: [/plan-review role/i, /Verdict:/, /Missing verification:/, /Alternative angle:/]
-    },
-    "composer-implementation-reviewer": {
-      file: ".agents/composer-implementation-reviewer.md",
-      expected: [/implementation-review role/i, /Test gaps:/, /Release risks:/, /Implementation under review:/]
-    },
-    "composer-reviewer": {
-      file: ".agents/composer-reviewer.md",
-      expected: [/defect/i, /Severity:/, /Suggested fix:/, /Verification gaps:/]
-    }
-  };
-
-  for (const [name, agent] of Object.entries(agents)) {
-    const body = read(agent.file);
+test("scouts have correct frontmatter and role-specific output schema", () => {
+  for (const [name, spec] of Object.entries(AGENT_SPECS)) {
+    const body = read(`.agents/${name}.md`);
     const meta = frontmatter(body);
     assert.equal(meta["run-agent"], "cursor-agent", `${name} should use Cursor CLI`);
-    assert.equal(meta.permission, "read-only", `${name} should be read-only`);
-    assert.equal(meta.tools, "Read, Glob, Grep", `${name} should expose only read/search tools`);
-    assert.doesNotMatch(JSON.stringify(meta), /\b(Shell|Write|Apply|Task)\b/);
-    assert.match(body, new RegExp(`# ${name.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())}`));
-    assert.doesNotMatch(body, /permission: safe-edit/);
-    assert.match(body, /one read-only artifact in a host-supervised playbook run/i);
-    assert.match(body, /The host decides edits, tests, commits, pushes, and final answers/i);
-    assert.match(body, /Do not run shell commands, tests, package installs, or state-changing tools/i);
-    assert.match(body, /Do not commit, push/i);
-    assert.match(body, /Agent:/);
-    assert.match(body, /Angle:/);
-    assert.match(body, /Playbook:/);
-    for (const pattern of agent.expected) {
-      assert.match(body, pattern);
+    assert.equal(meta.permission, spec.permission, `${name} permission`);
+    assert.equal(meta.permissionMode, spec.permissionMode, `${name} permissionMode`);
+    assert.equal(meta.tools, spec.tools, `${name} tools`);
+    assert.ok(body.includes(spec.title), `${name} should have title ${spec.title}`);
+    for (const pattern of spec.expected) {
+      assert.match(body, pattern, `${name} body should match ${pattern}`);
     }
   }
 });
 
-test("playbook contracts are first-class and bundled with the plugin", () => {
-  for (const playbookName of PLAYBOOK_NAMES) {
-    const rootPath = `playbooks/${playbookName}.md`;
-    const pluginPath = `plugins/composer-swarm/playbooks/${playbookName}.md`;
-    const body = read(rootPath);
-
-    assert.equal(read(pluginPath), body, `${playbookName} should stay synced between root and plugin bundle`);
-    assert.match(body, new RegExp(`name: ${playbookName}`));
-    assert.match(body, /## Context Brief/);
-    assert.match(body, /## Fan-Out/);
-    assert.match(body, /## Host Gate/);
-    assert.match(body, /## Quality Signals/);
+test("every scout has budget regimes and an adjacent-surprises footer", () => {
+  for (const name of AGENT_NAMES) {
+    const body = read(`.agents/${name}.md`);
+    assert.match(body, /## Budget regimes/, `${name} needs Budget regimes section`);
+    assert.match(body, /\*\*quick\*\*/i, `${name} needs quick budget`);
+    assert.match(body, /\*\*thorough\*\*/i, `${name} needs thorough budget`);
+    assert.match(body, /\*\*exhaustive\*\*/i, `${name} needs exhaustive budget`);
+    assert.match(body, /Budget: quick\|thorough\|exhaustive/, `${name} output must include Budget field`);
+    assert.match(body, /Adjacent surprises:/, `${name} output must include Adjacent surprises footer`);
+    assert.match(body, /1-3 things/, `${name} surprises footer must demand 1-3 entries`);
+    assert.match(body, /path:line/, `${name} must require path:line evidence`);
   }
+});
+
+test("read-only scouts enforce no-shell discipline; runner is the exception", () => {
+  for (const name of ["composer-wide-search", "composer-deep-search"]) {
+    const body = read(`.agents/${name}.md`);
+    assert.match(body, /Read-only/, `${name} should declare Read-only`);
+    assert.match(body, /Do not edit/i);
+    assert.match(body, /commit, push/i);
+    assert.match(body, /run shell commands/i);
+  }
+  const runner = read(`.agents/composer-runner.md`);
+  assert.match(runner, /shell access/i, "runner should declare shell access");
+  assert.match(runner, /one command, exactly as the main agent named it/i);
+  assert.match(runner, /looks dangerous/i);
+  assert.match(runner, /refuse/i);
+  assert.match(runner, /Do not branch into other shell work/);
 });
 
 test("repo stays focused on the prompt pack", () => {
@@ -115,7 +137,18 @@ test("repo stays focused on the prompt pack", () => {
     "src/args.mjs",
     "swarm.config.example.json",
     "skills/composer-swarm",
-    ".composer-swarm/config.json"
+    ".composer-swarm/config.json",
+    ".composer-swarm/receipt-001.md",
+    ".agents/composer-affirm.md",
+    ".agents/composer-refute.md",
+    ".agents/composer-reasoning-reviewer.md",
+    ".agents/composer-plan-reviewer.md",
+    ".agents/composer-implementation-reviewer.md",
+    ".agents/composer-reviewer.md",
+    "playbooks",
+    "plugins/composer-swarm/playbooks",
+    "plugins/composer-swarm/opencode",
+    "docs/prompt-agents.md"
   ];
 
   for (const relativePath of removedPaths) {
@@ -123,30 +156,24 @@ test("repo stays focused on the prompt pack", () => {
   }
 });
 
-test("plugin manifests make the prompt pack installable", () => {
+test("plugin manifests pin the same version", () => {
   const codexMarketplace = JSON.parse(read(".agents/plugins/marketplace.json"));
   assert.equal(codexMarketplace.name, "composer-swarm");
-  assert.equal(codexMarketplace.plugins[0].name, "composer-swarm");
   assert.equal(codexMarketplace.plugins[0].source.path, "./plugins/composer-swarm");
-  assert.equal(codexMarketplace.plugins[0].policy.installation, "AVAILABLE");
-  assert.equal(codexMarketplace.plugins[0].policy.authentication, "ON_INSTALL");
 
   const claudeMarketplace = JSON.parse(read(".claude-plugin/marketplace.json"));
-  assert.equal(claudeMarketplace.name, "jxucoder-composer-swarm");
-  assert.equal(claudeMarketplace.plugins[0].name, "composer-swarm");
-  assert.equal(claudeMarketplace.plugins[0].source, "./plugins/composer-swarm");
+  assert.equal(claudeMarketplace.plugins[0].version, EXPECTED_VERSION);
+  assert.equal(claudeMarketplace.metadata.version, EXPECTED_VERSION);
 
   const codexPlugin = JSON.parse(read("plugins/composer-swarm/.codex-plugin/plugin.json"));
-  assert.equal(codexPlugin.name, "composer-swarm");
-  assert.equal(codexPlugin.skills, "./skills/");
+  assert.equal(codexPlugin.version, EXPECTED_VERSION);
   assert.equal(codexPlugin.interface.displayName, "Composer Swarm");
 
   const claudePlugin = JSON.parse(read("plugins/composer-swarm/.claude-plugin/plugin.json"));
-  assert.equal(claudePlugin.name, "composer-swarm");
-  assert.equal(claudePlugin.version, "0.4.0");
+  assert.equal(claudePlugin.version, EXPECTED_VERSION);
 });
 
-test("plugin-bundled agents stay synced with root Runner agents", () => {
+test("plugin-bundled scouts stay synced with root scouts", () => {
   for (const agentName of AGENT_NAMES) {
     assert.equal(
       read(`plugins/composer-swarm/agents/${agentName}.md`),
@@ -156,102 +183,125 @@ test("plugin-bundled agents stay synced with root Runner agents", () => {
   }
 });
 
-test("docs describe operation fan-out usage without legacy runtime instructions", () => {
+test("plugin bundle contains no extra files of any kind (one-way migration enforcement)", () => {
+  // Strict: any file in the bundle agents dir must be one of the declared scouts.
+  // The previous version filtered by /^composer-.*\.md$/ and would have missed any
+  // junk file dropped in (e.g. notes.md, README.md, .DS_Store would slip past both
+  // the sync deletion loop AND this assertion). Now we list every non-hidden file
+  // and require an exact match.
+  const bundleDir = path.join(ROOT, "plugins/composer-swarm/agents");
+  const present = fs
+    .readdirSync(bundleDir)
+    .filter((name) => !name.startsWith("."))
+    .sort();
+  assert.deepEqual(
+    present,
+    [...AGENT_NAMES].sort().map((n) => `${n}.md`),
+    "bundle dir should contain exactly the declared scout files (no extras of any kind)"
+  );
+});
+
+test("docs frame delegation economics — three scouts, budget knob, surprises", () => {
   const readme = read("README.md");
-  const promptDocs = read("docs/prompt-agents.md");
-  const combined = `${readme}\n${promptDocs}`;
-
-  assert.match(readme, /Composer operation fan-out/);
-  for (const agentName of AGENT_NAMES) {
-    assert.match(combined, new RegExp(agentName));
-  }
-  assert.match(combined, /plugin marketplace add/);
-  assert.match(combined, /one setup pattern/i);
-  assert.match(combined, /Playbooks/);
-  for (const playbook of PLAYBOOK_NAMES) {
-    assert.match(combined, new RegExp(playbook));
-  }
-  assert.match(combined, /Packaged playbook contracts live in `playbooks\/`/);
-  assert.match(combined, /Targeted wide search starts from/i);
-  assert.match(combined, /Targeted deep search traces/i);
-  assert.match(combined, /Manual fallback/);
-  assert.match(combined, /Use the fallback only/i);
-  assert.doesNotMatch(combined, /composer-swarm (setup|team|verify|apply|cleanup)/);
-  assert.doesNotMatch(combined, /legacy runtime/i);
-});
-
-test("docs frame parallel fan-out as host-owned evidence and critique", () => {
-  const combined = `${read("README.md")}\n${read("docs/prompt-agents.md")}`;
-
-  assert.match(combined, /host-supervised operation fan-out/i);
-  assert.match(combined, /Problems Solved/);
-  assert.match(combined, /Search latency/);
-  assert.match(combined, /Coverage gaps/);
-  assert.match(combined, /Reasoning blind spots/);
-  assert.match(combined, /Plan risk/);
-  assert.match(combined, /Implementation risk/);
-  assert.match(combined, /Context overload/);
-  assert.match(combined, /Operation Fan-Out/);
-  assert.match(combined, /parallel evidence and critique/i);
-  assert.match(combined, /host agent keeps working locally/i);
-  assert.match(combined, /different angles/i);
-  assert.match(combined, /host owns synthesis/i);
-  assert.match(combined, /not delegation of judgment/i);
-  assert.match(combined, /Do not treat sub-agent output as a vote/i);
-});
-
-test("design makes playbook artifacts, gates, and quality signals explicit", () => {
-  const combined = `${read("README.md")}\n${read("docs/prompt-agents.md")}\n${read("docs/design.md")}`;
+  const design = read("docs/design.md");
   const skill = read("plugins/composer-swarm/skills/composer-swarm/SKILL.md");
+  const claudeMd = read("CLAUDE.md");
+  const contributing = read("CONTRIBUTING.md");
+  // CLAUDE.md and CONTRIBUTING.md are not shipped to npm consumers but they live
+  // in the repo and contribute to the maintainer-facing documentation surface.
+  // We scan them for legacy-term leakage too.
+  const combined = `${readme}\n${design}\n${skill}\n${claudeMd}\n${contributing}`;
 
-  for (const phrase of [
-    "Context Brief",
-    "Fan-Out",
-    "Agent Reports",
-    "Host Synthesis",
-    "Quality Signals",
-    "Human gates",
-    "claims verified",
-    "unresolved gaps",
-    "whether fan-out changed the plan"
-  ]) {
-    assert.match(combined, new RegExp(phrase, "i"));
+  for (const agentName of AGENT_NAMES) {
+    assert.match(combined, new RegExp(agentName), `docs should mention ${agentName}`);
   }
 
   for (const phrase of [
-    "Prepare a short context brief",
-    "Give each agent the same context brief and a distinct angle",
-    "return a compact host synthesis",
-    "Quality Signals",
-    "Do not ask Composer agents to commit, push, install packages, or edit files"
+    "delegation",
+    "marginal-value",
+    "wide search",
+    "deep search",
+    "budget",
+    "quick",
+    "thorough",
+    "exhaustive",
+    "Adjacent surprises",
+    "path:line",
+    "Cursor Composer"
   ]) {
-    assert.match(skill, new RegExp(phrase, "i"));
+    assert.match(combined, new RegExp(phrase, "i"), `docs should mention ${phrase}`);
   }
-});
 
-test("plugin default prompts prefer playbooks", () => {
-  const codexPlugin = JSON.parse(read("plugins/composer-swarm/.codex-plugin/plugin.json"));
-  const defaults = codexPlugin.interface.defaultPrompt.join("\n");
+  assert.match(readme, /plugin marketplace add/);
 
-  for (const playbook of [
+  // CLAUDE.md/CONTRIBUTING.md intentionally mention "no playbook" and "no
+  // receipt/predicate ceremony" as removed concepts. The legacy scan below
+  // forbids the *active feature names* of removed designs but not the
+  // negative statement words themselves. Bare "playbook" / "receipt" /
+  // "predicate" can therefore appear in negative framing.
+  for (const legacy of [
+    "composer-affirm",
+    "composer-refute",
+    "composer-reasoning-reviewer",
+    "composer-plan-reviewer",
+    "composer-implementation-reviewer",
+    "composer-reviewer",
     "investigate-bug",
     "review-plan",
     "review-implementation",
-    "pre-commit-risk-check"
+    "explore-subsystem",
+    "pre-commit-risk-check",
+    "proof-carrying",
+    "predicate-bearing",
+    "adversarial pairing",
+    "receipt-<run-id>"
   ]) {
-    assert.match(defaults, new RegExp(playbook));
+    assert.doesNotMatch(combined, new RegExp(legacy, "i"), `docs should not reference legacy: ${legacy}`);
+  }
+});
+
+test("plugin default prompts surface the three scouts (cross-host parity)", () => {
+  const codexPlugin = JSON.parse(read("plugins/composer-swarm/.codex-plugin/plugin.json"));
+  const claudePlugin = JSON.parse(read("plugins/composer-swarm/.claude-plugin/plugin.json"));
+
+  // Both hosts must surface the same dispatch prompts to keep the install UX
+  // consistent across Codex and Claude Code. Asserting structural equality
+  // ensures the two manifests don't silently drift.
+  assert.deepEqual(
+    claudePlugin.interface.defaultPrompt,
+    codexPlugin.interface.defaultPrompt,
+    "Claude and Codex defaultPrompt arrays must stay in lock-step"
+  );
+
+  for (const [hostName, plugin] of [["codex", codexPlugin], ["claude", claudePlugin]]) {
+    const defaults = plugin.interface.defaultPrompt.join("\n");
+    for (const name of AGENT_NAMES) {
+      assert.match(defaults, new RegExp(name), `${hostName} defaultPrompt should mention ${name}`);
+    }
+    assert.match(defaults, /budget/i, `${hostName} defaultPrompt should mention budget`);
+
+    for (const legacy of [
+      "investigate-bug",
+      "review-plan",
+      "review-implementation",
+      "pre-commit-risk-check",
+      "composer-affirm",
+      "composer-refute",
+      "certify"
+    ]) {
+      assert.doesNotMatch(defaults, new RegExp(legacy), `${hostName} defaultPrompt should not reference legacy ${legacy}`);
+    }
   }
 });
 
 test("package ships prompt-pack plugin artifacts", () => {
   const packageJson = JSON.parse(read("package.json"));
-  assert.equal(packageJson.version, "0.4.0");
+  assert.equal(packageJson.version, EXPECTED_VERSION);
   assert.equal(packageJson.license, "MIT");
   assert.equal("private" in packageJson, false);
   assert.deepEqual(packageJson.files, [
     ".agents/",
     ".claude-plugin/",
-    "playbooks/",
     "plugins/",
     "docs/",
     "README.md",

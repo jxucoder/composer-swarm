@@ -1,33 +1,27 @@
 {
   "name": "composer-swarm",
-  "version": "0.4.0",
-  "description": "Read-only Cursor Composer operation fan-out for Codex.",
+  "version": "0.7.0",
+  "description": "Cheap fast Cursor Composer scouts for marginal-value work.",
   "author": {
     "name": "jxucoder"
   },
   "homepage": "https://github.com/jxucoder/composer-swarm",
   "repository": "https://github.com/jxucoder/composer-swarm",
   "license": "MIT",
-  "keywords": ["composer", "cursor", "codex", "agents", "search", "review", "reasoning", "planning"],
+  "keywords": ["composer", "cursor", "codex", "scout", "wide-search", "deep-search", "runner", "delegation"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Composer Swarm",
-    "shortDescription": "Fan out read-only Composer operation agents.",
-    "longDescription": "Composer Swarm gives Codex an operation fan-out protocol and bundled read-only prompt agents for wide search, deep tracing, reasoning critique, plan review, implementation review, and defect-focused review.",
+    "shortDescription": "Cheap fast Composer scouts your main agent fans out marginal work to.",
+    "longDescription": "Three Cursor Composer scouts — composer-wide-search, composer-deep-search, composer-runner — that take sub-tasks the main agent doesn't want to spend its own tokens on. Each scout takes a budget hint (quick/thorough/exhaustive) and returns a structured report with an adjacent-surprises footer that flags 1-3 things the main agent didn't ask about. Read-only by default; runner has shell access for one named command.",
     "developerName": "jxucoder",
     "category": "Productivity",
     "capabilities": ["Interactive"],
     "defaultPrompt": [
-      "Use the Composer Swarm investigate-bug playbook on this failure.",
-      "Use the Composer Swarm review-plan playbook on this plan.",
-      "Use the Composer Swarm review-implementation playbook on this diff.",
-      "Use the Composer Swarm pre-commit-risk-check playbook before committing.",
-      "Use Composer Swarm operation fan-out on this subsystem.",
-      "Use composer-wide-search to map the relevant files.",
-      "Use composer-deep-search to trace this behavior.",
-      "Use composer-plan-reviewer to review this plan.",
-      "Use composer-implementation-reviewer to review this diff.",
-      "Use composer-reviewer to review this surface after search."
+      "Use composer-wide-search to map this subsystem, budget thorough.",
+      "Use composer-deep-search to trace this behavior end-to-end, budget thorough.",
+      "Use composer-runner to run `npm test`, budget thorough.",
+      "Fan out wide-search + deep-search + runner for bug investigation."
     ],
     "brandColor": "#2563EB"
   }

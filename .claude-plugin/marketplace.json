@@ -4,14 +4,14 @@
     "name": "jxucoder"
   },
   "metadata": {
-    "description": "Read-only Composer operation fan-out agents for Claude Code.",
-    "version": "0.4.0"
+    "description": "Cheap fast Cursor Composer scouts your main agent fans out marginal-value work to: wide search, deep search, command execution.",
+    "version": "0.7.0"
   },
   "plugins": [
     {
       "name": "composer-swarm",
-      "description": "Read-only search, reasoning, plan review, implementation review, and defect review agents.",
-      "version": "0.4.0",
+      "description": "Three Cursor Composer scouts — wide-search, deep-search, runner — that take marginal-value work the main agent shouldn't burn tokens on. Budget knob, adjacent-surprises footer.",
+      "version": "0.7.0",
       "author": {
         "name": "jxucoder"
       },

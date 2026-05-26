@@ -1,9 +1,9 @@
 {
   "name": "composer-swarm",
-  "version": "0.4.0",
+  "version": "0.7.0",
   "type": "module",
   "license": "MIT",
-  "description": "Read-only Cursor Composer operation fan-out prompts for Codex and Claude Code.",
+  "description": "Cheap fast Cursor Composer scouts for marginal-value work the main agent shouldn't do inline: wide search, deep search, command execution. Budget knob, adjacent-surprises footer.",
   "repository": {
     "type": "git",
     "url": "https://github.com/jxucoder/composer-swarm.git"
@@ -13,21 +13,22 @@
     "claude-code",
     "cursor",
     "composer",
-    "agents",
-    "plugins",
-    "reasoning",
-    "planning"
+    "scout",
+    "wide-search",
+    "deep-search",
+    "runner",
+    "delegation"
   ],
   "files": [
     ".agents/",
     ".claude-plugin/",
-    "playbooks/",
     "plugins/",
     "docs/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "sync": "node scripts/sync-bundle.mjs",
     "test": "node --test tests/*.test.mjs"
   }
 }

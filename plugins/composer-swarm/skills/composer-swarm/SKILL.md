@@ -1,80 +1,95 @@
 ---
 name: composer-swarm
-description: Use read-only Composer operation fan-out to strengthen host search, reasoning, plan review, and implementation review.
+description: Fan out cheap fast Cursor Composer scouts for marginal-value work — wide search, deep search, or command execution — each with a budget knob and adjacent-surprises footer.
 ---
 
 # Composer Swarm
 
-Use this skill when the user asks for Composer Swarm, Composer fan-out, Composer search, reasoning review,
-plan review, implementation review, review from multiple angles, or parallel read-only repository
-investigation.
+Use this skill when the user asks for Composer Swarm, cheap parallel
+scouts, wide search, deep search, multi-hop tracing, test running
+delegation, or research a main agent could do itself but shouldn't.
 
-Composer Swarm is operation fan-out, not delegation of judgment. The host agent keeps working locally and
-owns synthesis, edits, tests, commits, and pushes. Composer agents provide parallel evidence and critique.
+Composer Swarm is delegation economics. The main agent owns synthesis,
+edits, tests, commits, and pushes. Three Cursor Composer scouts handle
+marginal-value sub-tasks the main agent shouldn't burn its own tokens
+on.
 
-Packaged playbook contracts live in `../../playbooks/`.
+Bundled scouts:
 
-## Host Protocol
+- `composer-wide-search` — coverage-disciplined map of a subsystem.
+- `composer-deep-search` — depth-disciplined trace of one behavior.
+- `composer-runner` — execution of one named command, structured
+  summary returned.
 
-When the task is broad, risky, or unclear:
+## When to dispatch
 
-1. Start your own local search or reasoning first.
-2. Prepare a short context brief: objective, known files, current hypothesis or plan, constraints, and checks
-   already run.
-3. Choose the smallest playbook that covers the risk:
-   - `investigate-bug`: `composer-wide-search`, `composer-deep-search`, `composer-reasoning-reviewer`
-   - `review-plan`: `composer-plan-reviewer`, `composer-reasoning-reviewer`, targeted `composer-wide-search`
-   - `review-implementation`: `composer-implementation-reviewer`, `composer-reviewer`, targeted `composer-deep-search`
-   - `explore-subsystem`: `composer-wide-search`, `composer-deep-search`, `composer-reasoning-reviewer`
-   - `pre-commit-risk-check`: `composer-implementation-reviewer`, `composer-reviewer`, `composer-plan-reviewer`
-   Targeted wide search starts from seed files, a diff, failing output, or a narrowed question and maps
-   adjacent source, tests, docs, configs, and call sites. Targeted deep search traces one specific behavior
-   through callers, state, errors, and tests.
-4. Launch the playbook's read-only Composer agents in parallel when Runner/sub-agent dispatch is available.
-5. Give each agent the same context brief and a distinct angle.
-6. Continue local search, reasoning, or implementation while they run.
-7. Reconcile reports with your own work:
-   - verify file references
-   - discard unsupported claims
-   - resolve contradictions
-   - decide next action yourself
-8. Do not edit based only on sub-agent output.
+A scout is right when:
 
-For substantial runs, return a compact host synthesis:
+- The sub-task takes more than 5 main-agent grep/read tool calls.
+- The sub-task is parallelizable with main-agent reasoning.
+- The sub-task's raw output (test logs, full file dumps) would pollute
+  the main agent's context.
+- The sub-task is concrete enough to define in 1-2 sentences.
 
-```text
-Playbook: <name>
-Context Brief: <objective, scope, hypothesis, constraints>
-Fan-Out: <agents and angles>
-Agent Reports: <brief report summaries by agent and angle>
-Local Work: <what the host checked while agents ran>
-Verified Evidence: <claims checked against source or commands>
-Contradictions: <conflicts and resolution>
-Decision: <edit, answer, revise plan, or no-op>
-Quality Signals: <agents launched, angles covered, files or flows mapped, claims verified, checks run, unresolved gaps, whether fan-out changed the plan>
-```
+A scout is wrong when:
 
-Human gates:
+- The sub-task requires judgment (write a fix, decide between options).
+- The sub-task is irreducibly part of the main agent's reasoning chain.
+- The sub-task is small enough that delegation overhead exceeds
+  savings.
 
-- Verify a likely bug cause before editing.
-- Accept or revise a plan before implementing it.
-- Verify review findings before keeping a diff.
-- Run local checks and surface unresolved risks before commit, push, or release.
-- Do not ask Composer agents to commit, push, install packages, or edit files.
+## Dispatch protocol
 
-## Dispatch
+For each delegation:
 
-Use the installed Runner/sub-agents workflow:
+1. Name the scout (`composer-wide-search`, `composer-deep-search`, or
+   `composer-runner`).
+2. State the task in 1-2 sentences. Wide-search needs a subsystem;
+   deep-search needs a behavior; runner needs an exact command.
+3. Name the budget (`quick`, `thorough`, `exhaustive`). Default
+   `thorough`.
+4. Optional: seed files, starting point, or working directory.
+
+Example dispatches:
 
 ```text
-Use the Composer Swarm review-plan playbook on <topic>.
-Use different angles and return evidence for host synthesis.
+Use composer-wide-search to map all files in src/auth that touch JWT
+verification. Budget thorough.
+
+Use composer-deep-search to trace what happens when login() is called
+with an expired refresh token. Start at src/auth/login.ts:42. Budget
+exhaustive.
+
+Use composer-runner to run `npm test -- auth/login`. Budget thorough.
 ```
 
-If Runner or the bundled agents are not visible, give the user the consolidated setup:
+## Reading reports
 
-1. Install Cursor CLI and run `cursor-agent login`.
-2. Install Runner.
-3. Install Composer Swarm from this repo's marketplace file.
+Each scout returns:
 
-All bundled agents are read-only. Do not ask them to commit, push, install packages, or edit files.
+- A structured body (`Map:` / `Trace:` / `Command:` summary).
+- An **Adjacent surprises** footer (1-3 things the main agent did not
+  ask about; each cites `path:line`).
+- A **Gaps** section (what the scout couldn't cover).
+
+Read the surprises footer carefully. Scouts see the surroundings the
+main agent doesn't. A surprise often points at the root cause faster
+than the assigned task does.
+
+## Human gates
+
+- Verify high-stakes claims against source before editing. Scout reports
+  cite `path:line`; spot-check the few that matter.
+- Do not ask scouts to commit, push, install packages, edit files, or
+  perform sub-task work outside the scout's defined shape.
+- The runner scout may run only the one command the main agent named —
+  do not ask it to "investigate" failures by running more commands.
+  Dispatch another runner instead.
+
+## Setup
+
+If the user reports scouts are not visible, give them:
+
+1. Install Cursor CLI; run `cursor-agent login`.
+2. Install Runner from `shinpr/sub-agents-skills`.
+3. Install Composer Swarm from this repo's marketplace.

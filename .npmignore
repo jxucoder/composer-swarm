@@ -1,5 +1,0 @@
-.composer-swarm/
-node_modules/
-repos/
-*.tgz
-.DS_Store
