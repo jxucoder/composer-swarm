@@ -16,8 +16,8 @@ Adjacent surprises footer.
 There is no runtime, daemon, apply step, playbook system, or local state
 format in this repo.
 
-See `docs/design.md` for the design and `CONTRIBUTING.md` for the edit/sync
-workflow.
+See `docs/design.md` for the design and `CONTRIBUTING.md` for the edit
+workflow and release checklist.
 
 ## Commands
 
@@ -46,9 +46,16 @@ npm test         # Structural tests for scouts, manifests, docs
 
 ## Out of scope
 
-- No runtime code. Tests enforce that `bin/`, `src/runtime.mjs`,
-  `swarm.config.example.json`, `.composer-swarm/config.json`, `playbooks/`,
-  and `plugins/composer-swarm/playbooks` do not exist.
+- No runtime code. The `repo stays focused on the prompt pack` test in
+  `tests/prompt-pack.test.mjs` enforces a denylist of legacy paths that
+  must not reappear: v0.4-era runtime (`bin/`, `src/`,
+  `swarm.config.example.json`, `.composer-swarm/config.json`), v0.5
+  reviewer agents (`composer-{reasoning,plan,implementation}-reviewer`,
+  `composer-reviewer`), v0.6 adversarial agents
+  (`composer-affirm`, `composer-refute`), v0.7 root scout duplicates
+  (`.agents/composer-{wide-search,deep-search,runner}.md`),
+  `scripts/sync-bundle.mjs`, `playbooks/`, the OpenCode bundle, and
+  `docs/prompt-agents.md`. See the test for the full list.
 - No playbooks. Common usage patterns appear as README examples, not as
   Markdown files the main agent has to load.
 - No receipt/predicate ceremony. Scouts return structured reports; the
