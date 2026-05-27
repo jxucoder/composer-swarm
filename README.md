@@ -145,6 +145,19 @@ codex plugin marketplace add jxucoder/composer-swarm
 
 Install **Composer Swarm** → restart.
 
+## Design advantages
+
+1. **Three shapes, not one generic scout.** The job space splits into coverage (wide-search), depth (deep-search), and execution (runner). A single "search agent" prompt can't serve all three well — each has a different discipline and stopping condition.
+2. **Budget knob removes the fast-vs-thorough hedge.** Every scout takes `quick` / `thorough` / `exhaustive`. The main agent declares intent; the scout has three regimes that match. No standing tension in the prompt.
+3. **Adjacent surprises attack blindspots.** Scouts flag 1-3 things the main agent didn't ask about, each cited at `path:line`. Most search tools answer exactly the question — scouts also answer what you forgot to ask.
+4. **Severity calibration separates observation from speculation.** Findings split into observed (cited at `path:line`), inferred ("implies..." / "may cause..."), and hypotheses (need evidence). Scouts cannot call something "broken" without citing the behavior.
+5. **Task restatement catches misunderstanding early.** Every scout echoes a `Task:` line restating what it understood. Drift there tells the main agent the brief was unclear — before reading a report built on the wrong premise.
+6. **Convergence over count.** When multiple scouts fan out, the strongest signal is independent rediscovery — two scouts hitting the same issue from different angles. The `Task:` echo makes this diffable.
+7. **Hypotheses bucket keeps speculation honest.** Suspicions that lack evidence go in a separate section, not mixed into findings. The main agent decides whether to re-dispatch a runner or deeper trace to substantiate.
+8. **PR comment filter prevents noise.** Scout output is a working draft. Only findings with cited evidence, cross-scout convergence or clear blast radius, and in-PR actionability earn a comment. Hypotheses and marginal surprises stay in notes.
+9. **~60x cheaper than inline work.** Scouts run on Cursor Composer 2.5 (~$0.07/task) while the main agent stays on Opus/Codex. Read-only search and test summarization don't need frontier reasoning — they need coverage and structured output.
+10. **Markdown-only, no runtime.** The entire plugin is prompt files and frontmatter. No daemon, no state format, no sync step, no code to maintain. Scouts are defined by their discipline, not by infrastructure.
+
 ## How it differs from neighbors
 
 | Tool | What it does | Where Composer Swarm differs |
