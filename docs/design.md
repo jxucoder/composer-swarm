@@ -53,9 +53,13 @@ Adjacent surprises:
 
 1-3 entries. Each tied to a `path:line` (the runner scout may
 substitute a test name when the surprise comes from test output).
-Each something a junior engineer would point at and say "wait, is
-that supposed to be like that?" — TODOs, orphan tests, suspicious
-comments, dead paths, deprecation warnings, off-by-one risks.
+Each something that could plausibly share a root cause with the
+assigned task, sit on the same code path, or change the answer to
+it — TODOs along the trace, orphan tests in the map, suspicious
+comments near the touched code, deprecation warnings on the
+exercised path. Random oddities elsewhere are out, even if
+interesting; that bar exists because earlier versions of the
+prompt drowned PR comments in unrelated noise.
 
 This footer is the single most novel part of the design. Most search
 tools answer exactly the question. A scout that says "you asked X but Y
@@ -67,6 +71,56 @@ The risk is the scout hedges and lists vague concerns. The prompt
 explicitly forbids that — every surprise must cite `path:line`, and the
 footer is empty when nothing actually surprised the scout. Padding the
 list with hedges is worse than leaving it empty.
+
+## Severity calibration
+
+Scouts split findings into three buckets: observed behavior cited at
+`path:line` (or measured output for the runner), inferred consequences
+prefixed with "implies..." / "may cause...", and hypotheses that need
+new evidence (a runner pass, a wider trace, an endpoint timing). The
+prompt forbids the words "bug", "broken", "fails", or "invalid" unless
+the scout can cite the observed behavior.
+
+The motivation is a real failure mode of cheap scouts: they trace a
+contract mismatch — producer says X, consumer assumes Y — and report
+it as "X is broken" or "Y is invalid." The actual finding is
+ambiguity, not failure. Either label hedges in the wrong direction and
+burns reviewer trust when posted as a PR comment.
+
+The hypotheses bucket lets scouts surface suspicion without pretending
+they have evidence. The main agent decides whether to re-dispatch a
+runner (or a deeper trace) to substantiate before acting.
+
+## Task restatement
+
+Every scout echoes a `Task:` line at the top of its report — a
+one-sentence restatement of what it understood the main agent to be
+asking. The field is cheap (one line) and earns its place two ways:
+
+- Parallel scouts become distinguishable. Three scouts fanned out at
+  the same wide-search shape show three different restated tasks, so
+  their reports cross-reference cleanly.
+- Misunderstanding surfaces immediately. If the scout's restatement
+  drifts from what the main agent meant, the main agent sees it
+  before reading the body and can re-dispatch.
+
+The dispatch protocol stays at 1-2 sentences from the main agent. The
+restatement happens scout-side; the main agent does not have to coin
+a slug.
+
+## Convergence over count
+
+When the main agent fans out multiple scouts on the same
+investigation, the strongest signal is *independent rediscovery* — two
+scouts hitting the same issue from different angles. The `Task:`
+header each scout echoes makes convergence visible: the main agent
+scans what each scout understood the question to be, then diffs the
+findings.
+
+Single-scout flags get extra skepticism, especially in the hypotheses
+and adjacent-surprises sections. Convergence is not inter-scout
+ceremony — there is still no protocol between scouts — it is
+pattern-matching the main agent does at synthesis time.
 
 ## Read-only by default, execute by exception
 

@@ -31,7 +31,7 @@ const AGENT_NAMES = [
   "composer-deep-search",
   "composer-runner"
 ];
-const EXPECTED_VERSION = "0.7.0";
+const EXPECTED_VERSION = "0.8.0";
 
 const AGENT_SPECS = {
   "composer-wide-search": {
@@ -113,6 +113,19 @@ test("every scout has budget regimes and an adjacent-surprises footer", () => {
     assert.match(body, /Adjacent surprises:/, `${name} output must include Adjacent surprises footer`);
     assert.match(body, /1-3 things/, `${name} surprises footer must demand 1-3 entries`);
     assert.match(body, /path:line/, `${name} must require path:line evidence`);
+  }
+});
+
+test("every scout echoes Task, has Severity discipline, and Hypotheses bucket", () => {
+  // These three pieces are the v0.8.0 calibration additions. Drift would
+  // re-open the noise/overclaim failure mode the swarm-feedback edit fixed.
+  for (const name of AGENT_NAMES) {
+    const body = read(SCOUT_PATH(name));
+    assert.match(body, /^Task: <one-line restatement/m, `${name} output must include Task restatement field`);
+    assert.match(body, /## Severity discipline/, `${name} must have Severity discipline section`);
+    assert.match(body, /observed/i, `${name} severity section must name 'observed' bucket`);
+    assert.match(body, /inferred/i, `${name} severity section must name 'inferred' bucket`);
+    assert.match(body, /Hypotheses \(need evidence\):/, `${name} output must include Hypotheses bucket`);
   }
 });
 
@@ -228,7 +241,12 @@ test("docs frame delegation economics — three scouts, budget knob, surprises",
     "exhaustive",
     "Adjacent surprises",
     "path:line",
-    "Cursor Composer"
+    "Cursor Composer",
+    "Severity calibration",
+    "Task restatement",
+    "Convergence",
+    "Filtering to PR comments",
+    "Hypotheses"
   ]) {
     assert.match(combined, new RegExp(phrase, "i"), `docs should mention ${phrase}`);
   }

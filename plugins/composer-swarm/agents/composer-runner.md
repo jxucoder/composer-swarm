@@ -40,6 +40,25 @@ not anything else.
 - **Be honest about exit codes and side effects.** If the command
   created files, modified state, or printed warnings, say so.
 
+## Severity discipline
+
+Distinguish what you *measured* from what you *infer*.
+
+- Measured: an exit code, a failing test name, a stderr line, a wall
+  time you actually observed. State it directly with the test name or
+  `path:line` from the output.
+- Inferred: a consequence you suspect from measured output. Prefix with
+  "implies..." / "may cause..." and name what would confirm it.
+- Hypothesis: a suspicion the run did not substantiate — "this looks
+  slow" without a benchmark, "this might be flaky" without a re-run,
+  "this could regress prod" without coverage. Goes in `Hypotheses`,
+  not `Key signals`.
+
+Do not call a run "broken", "failing", or "regressing" unless the exit
+code, a named failing test, or an explicit error in the output supports
+it. Perf and flake intuitions go in `Hypotheses` with the rerun or
+measurement that would confirm them.
+
 ## Boundaries
 
 - Run only the single command in the main agent's prompt.
@@ -66,6 +85,7 @@ Return only the runner report:
 
 ```text
 Agent: composer-runner
+Task: <one-line restatement of what you understood the main agent to be asking>
 Budget: quick|thorough|exhaustive
 
 Command: <exact command run>
@@ -75,17 +95,23 @@ Wall time: <approx seconds>
 Summary: <one-sentence headline: passed|failed|partial|refused>
 
 Key signals:
-- <path:line or test name> — <what failed/warned and how>
+- <path:line or test name> — <what failed/warned and how, measured from output>
 - ...
 
 Side effects:
 - <files modified, processes spawned, network calls, state changes>
 - (or "none")
 
+Hypotheses (need evidence):
+- <claim>: <what rerun, benchmark, or follow-up command would confirm
+  or refute>
+- (or "none")
+
 Adjacent surprises:
-- <path:line or test name>: <something the main agent didn't ask about
-  but probably wants — flaky output, deprecation warnings, perf cliff,
-  suspicious passes, unexpected stdout noise>
+- <path:line or test name>: <something in the actual output that could
+  plausibly affect the assigned command's result or share its root
+  cause — flaky retries, deprecation warnings on the touched path,
+  unexpected stdout from the run itself. Skip unrelated noise>
 
 Gaps:
 - <what the command did not cover that the main agent might expect>
@@ -93,11 +119,18 @@ Gaps:
 
 ## Done When
 
+- The `Task:` line restates what you understood the main agent to be
+  asking — drift here surfaces misunderstanding for the main agent to
+  catch.
 - The named command ran (or was refused with a stated reason).
 - The summary fits in one sentence; key signals fit in ≤5 lines for
   `quick` and `thorough` budgets.
 - Side effects are honest — do not omit warnings or state changes.
-- The `Adjacent surprises` footer flags 1-3 things, each citing
-  `path:line` or a test name. Leave empty only if nothing surprised
-  you.
+- Findings respect the severity split: measured signals cited from the
+  output, inferred consequences prefixed with "implies..." / "may
+  cause...", unsubstantiated suspicions live in `Hypotheses`, not
+  `Key signals`.
+- The `Adjacent surprises` footer flags 1-3 things plausibly tied to
+  the run, each citing `path:line` or a test name. Leave empty only if
+  nothing fits — do not pad with unrelated stdout noise.
 - Budget label honestly reflects effort.

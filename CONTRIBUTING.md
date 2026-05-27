@@ -27,13 +27,17 @@ If you do add one:
   use `permission: execute`, `permissionMode: default`,
   `tools: Read, Glob, Grep, Bash` and must explicitly state the
   single-command discipline.
-- Every scout output must include a `Budget:` field, an `Adjacent
-  surprises:` footer with 1-3 entries citing `path:line`, and a
-  `Gaps:` section. Wide-search and deep-search outputs also include
-  a `Coverage:` field; wide-search adds `Map:` and `Cross-references:`;
-  deep-search adds `Trace:`, `State touched:`, `Error paths:`, and
-  `Tests covering this trace:`; runner adds `Command:`, `Exit:`,
-  `Summary:`, `Key signals:`, and `Side effects:`.
+- Every scout output must include a `Task:` line (one-sentence
+  restatement of what the scout understood), a `Budget:` field, a
+  `Hypotheses (need evidence)` section, an `Adjacent surprises:`
+  footer with 1-3 entries citing `path:line`, and a `Gaps:` section.
+  Every scout must also have a `## Severity discipline` section in
+  the prompt body that names the observed/inferred/hypothesis split.
+  Wide-search and deep-search outputs also include a `Coverage:` field;
+  wide-search adds `Map:` and `Cross-references:`; deep-search adds
+  `Trace:`, `State touched:`, `Error paths:`, and `Tests covering this
+  trace:`; runner adds `Command:`, `Exit:`, `Summary:`, `Key signals:`,
+  and `Side effects:`.
 - Add the new name to `AGENT_NAMES` in `tests/prompt-pack.test.mjs`
   and add per-scout assertions covering its specific output shape.
 - Update `README.md` and `docs/design.md` so the docs and tests stay

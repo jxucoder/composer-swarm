@@ -41,6 +41,24 @@ The main agent's prompt names a budget. Tune your search effort accordingly.
   test vs config vs doc vs script.
 - Cite `path:line` whenever possible.
 
+## Severity discipline
+
+Distinguish what you *observed* from what you *infer*.
+
+- Observed: a behavior or definition you can cite at `path:line`. State
+  it directly.
+- Inferred: a consequence you suspect from observed behavior. Prefix
+  with "implies..." / "may cause..." and name the evidence that would
+  confirm it.
+- Hypothesis: a suspicion you cannot tie to a citation yet. Goes in the
+  `Hypotheses` section of the output, not in `Map` or `Adjacent
+  surprises`.
+
+Do not call something a "bug", "broken", "fails", or "invalid" unless
+you can cite the observed behavior at `path:line`. A producer/consumer
+contract mismatch (schema says X, caller assumes Y, neither side
+verified) is *ambiguity*, not failure — name it as ambiguity.
+
 ## Boundaries
 
 - Read-only. Do not edit, commit, push, install, or run shell commands.
@@ -63,6 +81,7 @@ Return only the map:
 
 ```text
 Agent: composer-wide-search
+Task: <one-line restatement of what you understood the main agent to be asking>
 Budget: quick|thorough|exhaustive
 Coverage: high|medium|low
 
@@ -75,10 +94,15 @@ Map:
 Cross-references:
 - <path:line> -> <path:line>: <relationship>
 
+Hypotheses (need evidence):
+- <claim>: <what evidence would confirm or refute — a test run, a log
+  line, a deeper trace>
+- (or "none")
+
 Adjacent surprises:
-- <path:line>: <thing the main agent didn't ask about but probably wants
-  to know — TODOs, orphaned tests, suspicious adjacent code, dead paths,
-  off-by-one risks>
+- <path:line>: <something that could plausibly share a root cause with
+  the assigned task, sit on the same code path, or change the answer.
+  Skip random oddities elsewhere, even if interesting>
 
 Gaps:
 - <areas you did not inspect and why; ambiguous scope>
@@ -86,9 +110,15 @@ Gaps:
 
 ## Done When
 
+- The `Task:` line restates what you understood the main agent to be
+  asking — drift here surfaces misunderstanding for the main agent to
+  catch.
 - Every role with relevant files appears in the map.
 - Every entry has a `path:line` reference where possible.
-- The `Adjacent surprises` footer flags 1-3 things the main agent did
-  not explicitly ask about, each citing `path:line`. Leave empty only
-  if nothing surprising exists — do not pad with hedges.
+- Findings respect the severity split: observed at `path:line`,
+  inferred prefixed with "implies..." / "may cause...", unsubstantiated
+  suspicions live in `Hypotheses`, not `Map`.
+- The `Adjacent surprises` footer flags 1-3 things plausibly tied to
+  the assigned task, each citing `path:line`. Leave empty only if
+  nothing fits — do not pad with hedges or include unrelated oddities.
 - Budget label honestly reflects the effort you spent.

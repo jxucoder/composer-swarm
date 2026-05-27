@@ -67,14 +67,47 @@ Use composer-runner to run `npm test -- auth/login`. Budget thorough.
 
 Each scout returns:
 
+- A `Task:` line — the scout's one-sentence restatement of what it
+  understood. Read this first. If the restatement drifts from what you
+  meant, re-dispatch with a clearer prompt before trusting the rest.
 - A structured body (`Map:` / `Trace:` / `Command:` summary).
-- An **Adjacent surprises** footer (1-3 things the main agent did not
-  ask about; each cites `path:line`).
+- A `Hypotheses (need evidence)` section — suspicions the scout could
+  not cite at `path:line`. Treat as leads, not findings.
+- An **Adjacent surprises** footer (1-3 things plausibly tied to the
+  task; each cites `path:line`).
 - A **Gaps** section (what the scout couldn't cover).
 
 Read the surprises footer carefully. Scouts see the surroundings the
 main agent doesn't. A surprise often points at the root cause faster
 than the assigned task does.
+
+## Convergence
+
+When multiple scouts fan out on the same investigation, weight findings
+by *independent rediscovery*. A finding two scouts hit from different
+angles is far stronger than a finding one scout flagged. The `Task:`
+header each scout echoes makes this comparable — scan it to see what
+each scout actually understood the question to be, then diff their
+reports.
+
+Single-scout flags need extra skepticism, especially under `Hypotheses`
+or `Adjacent surprises`. The main agent decides whether to re-dispatch
+a runner or a deeper trace to substantiate.
+
+## Filtering to PR comments
+
+Scout output is a working draft, not a comment thread. Before posting
+to a PR, drop findings that don't meet all three of:
+
+1. Cited evidence at `path:line`, or a measured signal from runner output.
+2. Cross-scout convergence, or a blast radius you can articulate in one
+   sentence.
+3. Actionable in this PR — the reviewer can resolve it without further
+   speculation.
+
+Hypotheses, marginal adjacent surprises, and single-scout severity
+claims stay in your notes, not the PR. Two or three high-conviction
+comments beat ten hedged ones.
 
 ## Human gates
 

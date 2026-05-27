@@ -1,6 +1,6 @@
 {
   "name": "composer-swarm",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Cheap fast Cursor Composer scouts for marginal-value work.",
   "author": {
     "name": "jxucoder"
