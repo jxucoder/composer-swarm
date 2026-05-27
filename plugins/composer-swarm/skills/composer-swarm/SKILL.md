@@ -49,28 +49,75 @@ A scout is wrong when:
 
 ## Dispatch protocol
 
-For each delegation:
+To dispatch a scout, run `cursor-agent` via Bash with the scout's
+prompt file and the task. The model, mode, and tools are enforced at
+the CLI level — no middleware needed.
 
-1. Name the scout (`composer-wide-search`, `composer-deep-search`, or
-   `composer-runner`).
-2. State the task in 1-2 sentences. Wide-search needs a subsystem;
-   deep-search needs a behavior; runner needs an exact command.
-3. Name the budget (`quick`, `thorough`, `exhaustive`). Default
-   `thorough`.
-4. Optional: seed files, starting point, or working directory.
+**Read-only scouts** (wide-search, deep-search):
 
-Example dispatches:
-
-```text
-Use composer-wide-search to map all files in src/auth that touch JWT
-verification. Budget thorough.
-
-Use composer-deep-search to trace what happens when login() is called
-with an expired refresh token. Start at src/auth/login.ts:42. Budget
-exhaustive.
-
-Use composer-runner to run `npm test -- auth/login`. Budget thorough.
+```bash
+cursor-agent \
+  --model composer-2.5-fast \
+  --mode ask \
+  -p "You are a <scout-name> scout. <task>. Budget <budget>."
 ```
+
+`--mode ask` enforces read-only: the scout can read files but cannot
+edit, commit, or run shell commands.
+
+**Execution scout** (runner):
+
+```bash
+cursor-agent \
+  --model composer-2.5-fast \
+  -p "You are a composer-runner scout. Run: <exact command>. Budget <budget>."
+```
+
+No `--mode ask` — the runner needs shell access for the one named
+command.
+
+### Building the prompt
+
+Each scout has a full prompt in its agent file under
+`plugins/composer-swarm/agents/`. When dispatching:
+
+1. Read the scout's `.md` file (strip frontmatter).
+2. Append the task: what to map/trace/run, the budget, and optional
+   seed files or starting points.
+3. Pass as `-p` to `cursor-agent`.
+
+Or for a quick dispatch without reading the full prompt file, include
+the key discipline inline:
+
+```bash
+cursor-agent \
+  --model composer-2.5-fast \
+  --mode ask \
+  -p "You are a wide-search scout. Map every file in src/auth that
+touches JWT verification. Budget thorough. Return: Task (restate what
+you understood), Map grouped by role with path:line, Cross-references,
+Hypotheses (need evidence), Adjacent surprises (1-3, plausibly tied to
+task, each citing path:line), Gaps."
+```
+
+### Parallel dispatch
+
+Fan out multiple scouts simultaneously by running them in parallel:
+
+```bash
+cursor-agent --model composer-2.5-fast --mode ask \
+  -p "Wide-search scout. Map all files in src/auth. Budget thorough. ..." &
+
+cursor-agent --model composer-2.5-fast --mode ask \
+  -p "Deep-search scout. Trace login() with expired token. Budget exhaustive. ..." &
+
+cursor-agent --model composer-2.5-fast \
+  -p "Runner scout. Run: npm test -- auth/login. Budget thorough. ..." &
+
+wait
+```
+
+Main agent collects all three reports, then synthesizes.
 
 ## Reading reports
 
@@ -130,8 +177,8 @@ comments beat ten hedged ones.
 
 ## Setup
 
-If the user reports scouts are not visible, give them:
+If `cursor-agent` is not available:
 
-1. Install Cursor CLI; run `cursor-agent login`.
-2. Install Runner from `shinpr/sub-agents-skills`.
-3. Install Composer Swarm from this repo's marketplace.
+1. Install Cursor CLI: `curl https://cursor.com/install -fsS | bash`
+2. Authenticate: `cursor-agent login`
+3. Install Composer Swarm from the marketplace.

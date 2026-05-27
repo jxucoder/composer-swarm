@@ -93,7 +93,8 @@ Coverage + depth on the highest-risk path.
 
 ## Install
 
-Three pieces: Cursor CLI, Runner (dispatcher), Composer Swarm (scouts).
+Two pieces: Cursor CLI and Composer Swarm. No middleware needed —
+scouts dispatch directly via `cursor-agent`.
 
 **1. Cursor CLI**
 ```bash
@@ -101,18 +102,7 @@ curl https://cursor.com/install -fsS | bash
 cursor-agent login
 ```
 
-**2. Runner** — Claude Code:
-```text
-/plugin marketplace add shinpr/sub-agents-skills
-/plugin install runner@sub-agents-skills
-```
-Codex:
-```text
-codex plugin marketplace add shinpr/sub-agents-skills
-```
-Install **Runner** from `/plugins` → restart.
-
-**3. Composer Swarm** — Claude Code:
+**2. Composer Swarm** — Claude Code:
 ```text
 /plugin marketplace add jxucoder/composer-swarm
 /plugin install composer-swarm@jxucoder-composer-swarm
@@ -141,7 +131,7 @@ Install → restart.
 | Tool | What it does | Where Composer Swarm differs |
 |---|---|---|
 | Claude Code `Explore` | Cheap one-shot grep, Haiku-grade | Not agentic, no multi-hop traces, no command execution, no severity calibration, no adjacent-surprises footer |
-| `shinpr/sub-agents-skills` | Routes Markdown agents to multiple backends | The router; Composer Swarm is what you route |
+| `shinpr/sub-agents-skills` | Routes Markdown agents to multiple backends | Optional; Composer Swarm dispatches directly via `cursor-agent` CLI |
 | `wshobson/agents` | 191 generic agents | Prose output, no budget knob, no severity/hypothesis split, no task restatement, no adjacent-surprises footer, no execution scout |
 | `addyosmani/agent-skills` | Parallel fan-out with personas | No budget knob, no severity calibration, no convergence framing, no adjacent-surprises footer |
 
