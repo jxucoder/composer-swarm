@@ -2,6 +2,7 @@
 name: composer-runner
 description: Run one command (test, lint, build) and return structured summary — keeps raw output out of main agent context.
 run-agent: cursor-agent
+model: composer-2.5-fast
 permission: execute
 permissionMode: default
 tools: Read, Glob, Grep, Bash

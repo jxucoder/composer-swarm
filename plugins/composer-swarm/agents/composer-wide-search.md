@@ -2,6 +2,7 @@
 name: composer-wide-search
 description: Map subsystem files, tests, configs, call sites — replaces 3+ inline greps. Read-only.
 run-agent: cursor-agent
+model: composer-2.5-fast
 permission: read-only
 permissionMode: plan
 tools: Read, Glob, Grep

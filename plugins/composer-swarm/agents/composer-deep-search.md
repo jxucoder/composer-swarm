@@ -2,6 +2,7 @@
 name: composer-deep-search
 description: Trace one behavior entry-to-terminal — transforms, state, errors, tests. Replaces 4+ file reads to follow a call chain. Read-only.
 run-agent: cursor-agent
+model: composer-2.5-fast
 permission: read-only
 permissionMode: plan
 tools: Read, Glob, Grep
