@@ -1,6 +1,6 @@
 ---
 name: composer-swarm
-description: Map every file in a subsystem, trace a behavior end-to-end across files, or run a test and summarize the result — without polluting the main agent's context. Use when the task would take 3+ greps, spans multiple files to trace, or produces noisy output the main agent shouldn't read raw.
+description: Map files in a subsystem, trace behavior end-to-end, or run a test and summarize — delegates to cheap Composer scouts so raw output stays out of main agent context. Triggers on 3+ greps, multi-file traces, noisy command output.
 ---
 
 # Composer Swarm

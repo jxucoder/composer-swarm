@@ -1,6 +1,6 @@
 ---
 name: composer-runner
-description: Use instead of running a test/lint/build inline — executes one command and returns a structured summary so raw output stays out of the main agent's context.
+description: Run one command (test, lint, build) and return structured summary — keeps raw output out of main agent context.
 run-agent: cursor-agent
 permission: execute
 permissionMode: default
