@@ -1,6 +1,6 @@
 ---
 name: composer-deep-search
-description: Trace one behavior end-to-end — entry, transforms, state, errors, tests. Read-only.
+description: Use instead of reading 4+ files to follow one call chain — traces a behavior from entry through every transform, state change, and error path. Read-only.
 run-agent: cursor-agent
 permission: read-only
 permissionMode: plan

@@ -1,6 +1,6 @@
 ---
 name: composer-runner
-description: Execute one main-agent-supplied command (test, lint, type-check, dry-run) and return a structured summary, not raw output.
+description: Use instead of running a test/lint/build inline — executes one command and returns a structured summary so raw output stays out of the main agent's context.
 run-agent: cursor-agent
 permission: execute
 permissionMode: default

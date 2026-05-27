@@ -1,13 +1,21 @@
 ---
 name: composer-swarm
-description: Fan out cheap fast Cursor Composer scouts for marginal-value work — wide search, deep search, or command execution — each with a budget knob and adjacent-surprises footer.
+description: Map every file in a subsystem, trace a behavior end-to-end across files, or run a test and summarize the result — without polluting the main agent's context. Use when the task would take 3+ greps, spans multiple files to trace, or produces noisy output the main agent shouldn't read raw.
 ---
 
 # Composer Swarm
 
-Use this skill when the user asks for Composer Swarm, cheap parallel
-scouts, wide search, deep search, multi-hop tracing, test running
-delegation, or research a main agent could do itself but shouldn't.
+Use this skill when:
+- The user asks to map, find, or list all files/callers/tests in a
+  subsystem ("find every file that touches X", "who calls Y")
+- The user asks to trace a behavior end-to-end ("what happens when Z
+  is called", "follow this from entry to database")
+- The user asks to run a command and wants just the result ("run the
+  tests and tell me what failed", "check if it compiles")
+- The user mentions Composer Swarm, scouts, or delegation directly
+- The main agent is about to do 3+ consecutive greps in the same area,
+  read 4+ files to follow one call chain, or run a command whose output
+  would pollute its context
 
 Composer Swarm is delegation economics. The main agent owns synthesis,
 edits, tests, commits, and pushes. Three Cursor Composer scouts handle
@@ -25,7 +33,8 @@ Bundled scouts:
 
 A scout is right when:
 
-- The sub-task takes more than 5 main-agent grep/read tool calls.
+- A wide search across a subsystem would take more than 3 greps inline.
+- A deep search tracing one behavior would cross 4+ files.
 - The sub-task is parallelizable with main-agent reasoning.
 - The sub-task's raw output (test logs, full file dumps) would pollute
   the main agent's context.

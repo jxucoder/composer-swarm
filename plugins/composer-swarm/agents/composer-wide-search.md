@@ -1,6 +1,6 @@
 ---
 name: composer-wide-search
-description: Map a subsystem broadly — files, tests, configs, call sites, adjacent surprises. Read-only.
+description: Use instead of running 3+ greps to map a subsystem — finds every file, test, config, and call site. Read-only.
 run-agent: cursor-agent
 permission: read-only
 permissionMode: plan
