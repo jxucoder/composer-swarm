@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Cheap fast Cursor Composer scouts your main agent fans out marginal-value work to: wide search, deep search, command execution.",
-    "version": "0.8.0"
+    "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "composer-swarm",
       "description": "Three Cursor Composer scouts — wide-search, deep-search, runner — that take marginal-value work the main agent shouldn't burn tokens on. Budget knob, adjacent-surprises footer.",
-      "version": "0.8.0",
+      "version": "1.0.0",
       "author": {
         "name": "jxucoder"
       },

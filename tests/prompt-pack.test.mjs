@@ -31,7 +31,7 @@ const AGENT_NAMES = [
   "composer-deep-search",
   "composer-runner"
 ];
-const EXPECTED_VERSION = "0.8.0";
+const EXPECTED_VERSION = "1.0.0";
 
 const AGENT_SPECS = {
   "composer-wide-search": {
