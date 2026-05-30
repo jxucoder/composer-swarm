@@ -181,4 +181,3 @@ If `cursor-agent` is not available:
 
 1. Install Cursor CLI: `curl https://cursor.com/install -fsS | bash`
 2. Authenticate: `cursor-agent login`
-3. Install Composer Swarm from the marketplace.
